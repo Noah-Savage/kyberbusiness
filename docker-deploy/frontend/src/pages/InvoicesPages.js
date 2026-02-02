@@ -265,6 +265,8 @@ export function EditInvoicePage() {
   const [notes, setNotes] = useState("");
   const [dueDate, setDueDate] = useState(null);
   const [status, setStatus] = useState("draft");
+  const [taxRate, setTaxRate] = useState(10.0);
+  const [shipping, setShipping] = useState(0);
 
   useEffect(function() {
     api.get("/invoices/" + id).then(function(data) {
@@ -276,6 +278,8 @@ export function EditInvoicePage() {
       setNotes(data.notes || "");
       setDueDate(data.due_date);
       setStatus(data.status);
+      setTaxRate(data.tax_rate !== undefined ? data.tax_rate : 10.0);
+      setShipping(data.shipping || 0);
     }).catch(function() { toast.error("Failed to load invoice"); navigate("/invoices"); }).finally(function() { setLoading(false); });
   }, [id, navigate]);
 
@@ -289,13 +293,13 @@ export function EditInvoicePage() {
 
   let subtotal = 0;
   for (let i = 0; i < items.length; i++) { subtotal += items[i].quantity * items[i].price; }
-  const tax = subtotal * 0.1;
-  const total = subtotal + tax;
+  const tax = subtotal * (taxRate / 100);
+  const total = subtotal + tax + shipping;
 
   function handleSubmit(e) {
     e.preventDefault();
     setSaving(true);
-    api.put("/invoices/" + id, { client_name: clientName, client_email: clientEmail, client_address: clientAddress, items: items, notes: notes, due_date: dueDate, status: status })
+    api.put("/invoices/" + id, { client_name: clientName, client_email: clientEmail, client_address: clientAddress, items: items, notes: notes, due_date: dueDate, status: status, tax_rate: taxRate, shipping: shipping })
       .then(function() { toast.success("Invoice updated"); navigate("/invoices/" + id); })
       .catch(function(err) { toast.error(err.message); })
       .finally(function() { setSaving(false); });
