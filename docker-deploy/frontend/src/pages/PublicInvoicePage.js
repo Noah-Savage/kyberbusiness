@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
-import { formatCurrency, formatDate, API_URL } from "../lib/utils";
+import { formatCurrency, formatDate, API_URL, getUploadUrl } from "../lib/utils";
 import { KyberLogo } from "../components/KyberLogo";
 import { Card, CardContent } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
@@ -117,7 +117,7 @@ export function PublicInvoicePage() {
         <div className="flex items-center justify-center mb-8">
           <div className="flex items-center gap-3">
             {branding?.logo_url ? (
-              <img src={API_URL + branding.logo_url} alt={companyName} className="h-12 w-auto object-contain" />
+              <img src={getUploadUrl(branding.logo_url)} alt={companyName} className="h-12 w-auto object-contain" />
             ) : (
               <KyberLogo size={48} />
             )}
