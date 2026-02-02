@@ -259,22 +259,44 @@ function BrandingSettings() {
 function SMTPSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testEmail, setTestEmail] = useState("");
+  const [showTestDialog, setShowTestDialog] = useState(false);
   const [settings, setSettings] = useState({ host: "", port: 587, username: "", password: "", from_email: "", from_name: "", use_tls: true });
   const [configured, setConfigured] = useState(false);
+  const [passwordSet, setPasswordSet] = useState(false);
 
   useEffect(function() {
     api.get("/settings/smtp").then(function(data) {
       if (data.configured) {
         setSettings({ host: data.host || "", port: data.port || 587, username: data.username || "", password: "", from_email: data.from_email || "", from_name: data.from_name || "", use_tls: data.use_tls !== false });
         setConfigured(true);
+        setPasswordSet(data.password_set || false);
       }
     }).catch(function(err) { console.error(err); }).finally(function() { setLoading(false); });
   }, []);
 
   function handleSave() {
-    if (!settings.host || !settings.username || !settings.password || !settings.from_email) { toast.error("Please fill required fields"); return; }
+    if (!settings.host || !settings.username || !settings.from_email) { toast.error("Please fill required fields"); return; }
+    if (!configured && !settings.password) { toast.error("Password is required"); return; }
     setSaving(true);
-    api.post("/settings/smtp", settings).then(function() { toast.success("SMTP saved"); setConfigured(true); }).catch(function(err) { toast.error(err.message); }).finally(function() { setSaving(false); });
+    
+    // Only send password if it was changed
+    var dataToSend = { ...settings };
+    if (configured && !settings.password) {
+      delete dataToSend.password;
+    }
+    
+    api.post("/settings/smtp", dataToSend).then(function() { toast.success("SMTP settings saved"); setConfigured(true); setPasswordSet(true); }).catch(function(err) { toast.error(err.message); }).finally(function() { setSaving(false); });
+  }
+
+  function handleTestEmail() {
+    if (!testEmail) { toast.error("Please enter an email address"); return; }
+    setTesting(true);
+    api.post("/settings/smtp/test", { to_email: testEmail })
+      .then(function(data) { toast.success(data.message || "Test email sent!"); setShowTestDialog(false); setTestEmail(""); })
+      .catch(function(err) { toast.error(err.message || "Failed to send test email"); })
+      .finally(function() { setTesting(false); });
   }
 
   if (loading) return <div className="flex items-center justify-center p-12"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>;
@@ -297,7 +319,11 @@ function SMTPSettings() {
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2"><Label>Username *</Label><Input value={settings.username} onChange={function(e) { setSettings({ ...settings, username: e.target.value }); }} className="rounded-xl" data-testid="smtp-username" /></div>
-          <div className="space-y-2"><Label>Password *</Label><Input type="password" value={settings.password} onChange={function(e) { setSettings({ ...settings, password: e.target.value }); }} className="rounded-xl" data-testid="smtp-password" />{configured && <p className="text-xs text-muted-foreground">Leave blank to keep existing</p>}</div>
+          <div className="space-y-2">
+            <Label>Password *</Label>
+            <Input type="password" value={settings.password} onChange={function(e) { setSettings({ ...settings, password: e.target.value }); }} placeholder={passwordSet ? "••••••••" : ""} className="rounded-xl" data-testid="smtp-password" />
+            {configured && <p className="text-xs text-muted-foreground">{passwordSet ? "Password is set. Leave blank to keep existing." : "Password not set. Enter password to configure."}</p>}
+          </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2"><Label>From Email *</Label><Input type="email" value={settings.from_email} onChange={function(e) { setSettings({ ...settings, from_email: e.target.value }); }} className="rounded-xl" data-testid="smtp-from-email" /></div>
@@ -307,8 +333,34 @@ function SMTPSettings() {
           <div><p className="font-medium">Use TLS</p><p className="text-sm text-muted-foreground">Secure connection</p></div>
           <Switch checked={settings.use_tls} onCheckedChange={function(c) { setSettings({ ...settings, use_tls: c }); }} />
         </div>
-        <div className="flex justify-end"><Button onClick={handleSave} disabled={saving} className="rounded-full shadow-glow-cyan" data-testid="save-smtp">{saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}Save</Button></div>
+        <div className="flex justify-between gap-2">
+          <Button variant="outline" onClick={function() { setShowTestDialog(true); }} disabled={!configured} className="rounded-full" data-testid="test-smtp">
+            <Mail className="w-4 h-4 mr-2" />Send Test Email
+          </Button>
+          <Button onClick={handleSave} disabled={saving} className="rounded-full shadow-glow-cyan" data-testid="save-smtp">{saving ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Save className="w-4 h-4 mr-2" />}Save</Button>
+        </div>
       </CardContent>
+
+      <Dialog open={showTestDialog} onOpenChange={setShowTestDialog}>
+        <DialogContent className="rounded-3xl">
+          <DialogHeader>
+            <DialogTitle>Send Test Email</DialogTitle>
+            <DialogDescription>Enter an email address to receive a test email and verify your SMTP configuration.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Email Address</Label>
+              <Input type="email" value={testEmail} onChange={function(e) { setTestEmail(e.target.value); }} placeholder="test@example.com" className="rounded-xl" data-testid="test-email-input" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={function() { setShowTestDialog(false); }} className="rounded-full">Cancel</Button>
+            <Button onClick={handleTestEmail} disabled={testing} className="rounded-full" data-testid="send-test-email-btn">
+              {testing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Mail className="w-4 h-4 mr-2" />}Send Test
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
