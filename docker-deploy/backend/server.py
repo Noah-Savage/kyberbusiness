@@ -179,7 +179,7 @@ class SMTPSettings(BaseModel):
     host: str
     port: int
     username: str
-    password: str
+    password: Optional[str] = None
     from_email: str
     from_name: str
     use_tls: bool = True
