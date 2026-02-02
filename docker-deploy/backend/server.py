@@ -1163,16 +1163,33 @@ async def upload_logo(file: UploadFile = File(...), user: dict = Depends(require
     filename = f"company_logo.{file_ext}"
     filepath = UPLOAD_DIR / filename
     
+    # Ensure the directory exists
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    
     async with aiofiles.open(filepath, "wb") as f:
         await f.write(contents)
     
+    # Store just the filename, the frontend will construct the full URL
     logo_url = f"/api/uploads/{filename}"
     
-    await db.settings.update_one(
-        {"type": "branding"},
-        {"$set": {"data.logo_url": logo_url}},
-        upsert=True
-    )
+    # First ensure the branding document exists
+    existing = await db.settings.find_one({"type": "branding"})
+    if not existing:
+        await db.settings.insert_one({
+            "type": "branding",
+            "data": {
+                "company_name": "KyberBusiness",
+                "primary_color": "#06b6d4",
+                "secondary_color": "#d946ef",
+                "accent_color": "#10b981",
+                "logo_url": logo_url
+            }
+        })
+    else:
+        await db.settings.update_one(
+            {"type": "branding"},
+            {"$set": {"data.logo_url": logo_url}}
+        )
     
     return {"logo_url": logo_url}
 
