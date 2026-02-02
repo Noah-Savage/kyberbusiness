@@ -13,9 +13,12 @@ import { TrendingUp, TrendingDown, Receipt, FileText, Wallet, DollarSign, Plus, 
 const CHART_COLORS = ["#06b6d4", "#d946ef", "#10b981", "#f59e0b", "#8b5cf6"];
 
 function StatCard(props) {
-  const { title, value, icon: Icon, color } = props;
+  const { title, value, icon: Icon, color, onClick } = props;
   return (
-    <Card className="rounded-3xl bg-card/50 backdrop-blur-xl border-white/10 hover:shadow-glow-cyan transition-shadow duration-300">
+    <Card 
+      className={onClick ? "rounded-3xl bg-card/50 backdrop-blur-xl border-white/10 hover:shadow-glow-cyan transition-all duration-300 cursor-pointer hover:scale-[1.02]" : "rounded-3xl bg-card/50 backdrop-blur-xl border-white/10 hover:shadow-glow-cyan transition-shadow duration-300"}
+      onClick={onClick}
+    >
       <CardContent className="p-6">
         <div className="flex items-start justify-between">
           <div>
