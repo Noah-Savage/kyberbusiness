@@ -197,6 +197,18 @@ function BrandingSettings() {
             <Label>Website</Label>
             <Input value={settings.website} onChange={function(e) { setSettings({ ...settings, website: e.target.value }); }} className="rounded-xl" placeholder="https://yourcompany.com" data-testid="company-website" />
           </div>
+
+          <div className="space-y-2">
+            <Label>Default Tax Rate (%)</Label>
+            <Input type="number" step="0.1" min="0" max="100" value={settings.default_tax_rate} onChange={function(e) { setSettings({ ...settings, default_tax_rate: parseFloat(e.target.value) || 0 }); }} className="rounded-xl" placeholder="10" data-testid="default-tax-rate" />
+            <p className="text-xs text-muted-foreground">Default tax rate for new invoices</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Terms & Conditions</Label>
+            <Textarea value={settings.terms_and_conditions} onChange={function(e) { setSettings({ ...settings, terms_and_conditions: e.target.value }); }} className="rounded-xl min-h-[120px]" placeholder="Enter your sales terms and conditions that will appear on invoices..." data-testid="terms-conditions" />
+            <p className="text-xs text-muted-foreground">These terms will automatically appear on all new invoices</p>
+          </div>
         </CardContent>
       </Card>
 
