@@ -543,7 +543,8 @@ class KyberBusinessAPITester:
         if self.failed_tests:
             print(f"\n❌ Failed Tests ({len(self.failed_tests)}):")
             for test in self.failed_tests:
-                print(f"  - {test['name']}: {test.get('error', f'Expected {test.get(\"expected\")}, got {test.get(\"actual\")}')}")
+                error_msg = test.get('error', f"Expected {test.get('expected')}, got {test.get('actual')}")
+                print(f"  - {test['name']}: {error_msg}")
         
         success_rate = (self.tests_passed / self.tests_run * 100) if self.tests_run > 0 else 0
         print(f"\n📈 Success Rate: {success_rate:.1f}%")
