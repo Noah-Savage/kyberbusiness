@@ -42,6 +42,14 @@ Building KyberBusiness - an alternative to tools like InvoiceNinja for quoting, 
 - Responsive design for desktop and mobile
 - PWA manifest configured
 
+### Feb 2026 - Branding Feature
+- Company branding panel in Settings
+- Logo upload (5MB limit, PNG/JPG/SVG/GIF)
+- Company information (name, tagline, email, phone, address, website)
+- Customizable brand colors (primary, secondary, accent)
+- Public invoice page uses company branding
+- Color preview in settings
+
 ## Prioritized Backlog
 
 ### P0 - Critical
