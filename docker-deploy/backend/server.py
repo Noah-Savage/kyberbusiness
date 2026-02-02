@@ -113,6 +113,8 @@ class InvoiceCreate(BaseModel):
     notes: Optional[str] = ""
     due_date: Optional[str] = None
     status: str = "draft"
+    tax_rate: Optional[float] = 10.0  # Default 10%
+    shipping: Optional[float] = 0.0
 
 class InvoiceResponse(BaseModel):
     id: str
@@ -122,9 +124,12 @@ class InvoiceResponse(BaseModel):
     client_address: str
     items: List[Dict[str, Any]]
     subtotal: float
+    tax_rate: float
     tax: float
+    shipping: float
     total: float
     notes: str
+    terms: Optional[str]
     due_date: Optional[str]
     status: str
     payment_link: Optional[str]
