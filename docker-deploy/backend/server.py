@@ -1209,8 +1209,8 @@ async def upload_logo(file: UploadFile = File(...), user: dict = Depends(require
     async with aiofiles.open(filepath, "wb") as f:
         await f.write(contents)
     
-    # Store URL with /public prefix for unauthenticated access via img tags
-    logo_url = f"/public/uploads/{filename}"
+    # Store URL as simple /uploads/ path - nginx will proxy to backend
+    logo_url = f"/uploads/{filename}"
     
     # Update branding settings with logo URL
     await db.settings.update_one(
