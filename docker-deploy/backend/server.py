@@ -885,7 +885,18 @@ async def delete_vendor(vendor_id: str, user: dict = Depends(require_accountant_
 
 @api_router.post("/settings/smtp")
 async def save_smtp_settings(data: SMTPSettings, user: dict = Depends(require_admin)):
-    encrypted_password = encrypt_data(data.password)
+    # Get existing settings to preserve password if not provided
+    existing = await db.settings.find_one({"type": "smtp"}, {"_id": 0})
+    existing_data = existing.get("data", {}) if existing else {}
+    
+    # Use new password if provided, otherwise keep existing
+    if data.password:
+        encrypted_password = encrypt_data(data.password)
+    else:
+        encrypted_password = existing_data.get("password")
+        if not encrypted_password:
+            raise HTTPException(status_code=400, detail="Password is required for new SMTP configuration")
+    
     settings_doc = {
         "type": "smtp",
         "data": {
