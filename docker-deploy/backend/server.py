@@ -585,8 +585,14 @@ async def convert_quote_to_invoice(quote_id: str, user: dict = Depends(require_a
 
 @api_router.post("/invoices", response_model=InvoiceResponse)
 async def create_invoice(data: InvoiceCreate, user: dict = Depends(require_accountant_or_admin)):
-    subtotal, tax, total = calculate_totals(data.items)
+    tax_rate = data.tax_rate if data.tax_rate is not None else 10.0
+    shipping = data.shipping if data.shipping is not None else 0.0
+    subtotal, tax, total = calculate_totals(data.items, tax_rate, shipping)
     invoice_id = str(uuid.uuid4())
+    
+    # Get terms from branding settings
+    branding = await db.settings.find_one({"type": "branding"}, {"_id": 0})
+    terms = branding.get("data", {}).get("terms_and_conditions", "") if branding else ""
     
     invoice_doc = {
         "id": invoice_id,
@@ -596,9 +602,12 @@ async def create_invoice(data: InvoiceCreate, user: dict = Depends(require_accou
         "client_address": data.client_address or "",
         "items": data.items,
         "subtotal": subtotal,
+        "tax_rate": tax_rate,
         "tax": tax,
+        "shipping": shipping,
         "total": total,
         "notes": data.notes or "",
+        "terms": terms,
         "due_date": data.due_date,
         "status": data.status,
         "payment_link": None,
