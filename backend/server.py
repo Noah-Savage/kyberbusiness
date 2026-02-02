@@ -231,6 +231,8 @@ def create_token(user_id: str, email: str, role: str) -> str:
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
+        if not credentials or not credentials.credentials:
+            raise HTTPException(status_code=401, detail="Missing authentication token")
         payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         user_id = payload.get("sub")
         if not user_id:
