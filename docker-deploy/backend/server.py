@@ -1,39 +1,33 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, Query, BackgroundTasks
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import Response, FileResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime, timezone, timedelta
 import jwt
 import bcrypt
 from cryptography.fernet import Fernet
+import aiosmtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 import base64
 import secrets
 import aiofiles
 from bson import ObjectId
 
-# Configure logging early
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
-mongo_url = os.environ.get('MONGO_URL', 'mongodb://mongo:27017')
-db_name = os.environ.get('DB_NAME', 'kyberbusiness')
+mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
-db = client[db_name]
+db = client[os.environ['DB_NAME']]
 
 # Upload directory
 UPLOAD_DIR = ROOT_DIR / "uploads"
@@ -45,20 +39,7 @@ JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24
 
 # Encryption key for storing sensitive credentials
-# Generate a valid key if not provided or invalid
-def get_encryption_key():
-    key = os.environ.get('ENCRYPTION_KEY', '')
-    if key:
-        try:
-            # Test if it's a valid Fernet key
-            Fernet(key.encode() if isinstance(key, str) else key)
-            return key
-        except Exception:
-            pass
-    # Generate a new key if none provided or invalid
-    return Fernet.generate_key().decode()
-
-ENCRYPTION_KEY = get_encryption_key()
+ENCRYPTION_KEY = os.environ.get('ENCRYPTION_KEY', Fernet.generate_key().decode())
 cipher_suite = Fernet(ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY)
 
 # Create the main app
@@ -206,7 +187,7 @@ class PayPalSettings(BaseModel):
 
 class EmailTemplateCreate(BaseModel):
     name: str
-    theme: str
+    theme: str  # professional, modern, minimal, bold, classic
     subject: str
     body_html: str
 
@@ -229,8 +210,9 @@ class EmailTemplateResponse(BaseModel):
     body_html: str
     is_default: bool
 
-class GeneralSettings(BaseModel):
-    require_email_verification: bool = False
+class ReportRequest(BaseModel):
+    start_date: str
+    end_date: str
 
 class RoleUpdate(BaseModel):
     role: str
@@ -290,20 +272,39 @@ def generate_number(prefix: str) -> str:
 
 def calculate_totals(items: List[Dict[str, Any]]) -> tuple:
     subtotal = sum(item.get("quantity", 1) * item.get("price", 0) for item in items)
-    tax = subtotal * 0.1
+    tax = subtotal * 0.1  # 10% tax
     total = subtotal + tax
     return subtotal, tax, total
 
-async def get_general_settings():
-    settings = await db.settings.find_one({"type": "general"}, {"_id": 0})
+async def send_email(to_email: str, subject: str, body_html: str):
+    settings = await db.settings.find_one({"type": "smtp"}, {"_id": 0})
     if not settings:
-        return {"require_email_verification": False}
-    return settings.get("data", {"require_email_verification": False})
+        raise HTTPException(status_code=400, detail="SMTP not configured")
+    
+    try:
+        smtp_config = settings.get("data", {})
+        message = MIMEMultipart("alternative")
+        message["From"] = f"{smtp_config.get('from_name', 'KyberBusiness')} <{smtp_config.get('from_email')}>"
+        message["To"] = to_email
+        message["Subject"] = subject
+        message.attach(MIMEText(body_html, "html"))
+        
+        await aiosmtplib.send(
+            message,
+            hostname=smtp_config.get("host"),
+            port=smtp_config.get("port"),
+            username=smtp_config.get("username"),
+            password=decrypt_data(smtp_config.get("password")),
+            use_tls=smtp_config.get("use_tls", True)
+        )
+    except Exception as e:
+        logging.error(f"Failed to send email: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send email")
 
 # ==================== AUTH ROUTES ====================
 
 @api_router.post("/auth/register", response_model=TokenResponse)
-async def register(data: UserCreate):
+async def register(data: UserCreate, background_tasks: BackgroundTasks):
     existing = await db.users.find_one({"email": data.email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -312,12 +313,8 @@ async def register(data: UserCreate):
     is_admin = data.email.endswith("@thestarforge.org")
     role = UserRole.ADMIN if is_admin else UserRole.VIEWER
     
-    # Check if email verification is required
-    general_settings = await get_general_settings()
-    require_verification = general_settings.get("require_email_verification", False)
-    
     user_id = str(uuid.uuid4())
-    verification_token = secrets.token_urlsafe(32) if require_verification else None
+    verification_token = secrets.token_urlsafe(32)
     
     user_doc = {
         "id": user_id,
@@ -325,12 +322,15 @@ async def register(data: UserCreate):
         "name": data.name,
         "password": hash_password(data.password),
         "role": role,
-        "email_verified": not require_verification,  # Auto-verify if verification is disabled
+        "email_verified": False,
         "verification_token": verification_token,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
     await db.users.insert_one(user_doc)
+    
+    # Queue verification email
+    # background_tasks.add_task(send_verification_email, data.email, verification_token)
     
     token = create_token(user_id, data.email, role)
     
@@ -341,7 +341,7 @@ async def register(data: UserCreate):
             email=data.email,
             name=data.name,
             role=role,
-            email_verified=user_doc["email_verified"],
+            email_verified=False,
             created_at=user_doc["created_at"]
         )
     )
@@ -351,13 +351,6 @@ async def login(data: UserLogin):
     user = await db.users.find_one({"email": data.email}, {"_id": 0})
     if not user or not verify_password(data.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    
-    # Check if email verification is required
-    general_settings = await get_general_settings()
-    require_verification = general_settings.get("require_email_verification", False)
-    
-    if require_verification and not user.get("email_verified", False):
-        raise HTTPException(status_code=403, detail="Email not verified. Please check your email for verification link.")
     
     token = create_token(user["id"], user["email"], user["role"])
     
@@ -387,7 +380,7 @@ async def verify_email(token: str = Query(...)):
     return {"message": "Email verified successfully"}
 
 @api_router.post("/auth/resend-verification")
-async def resend_verification(user: dict = Depends(get_current_user)):
+async def resend_verification(background_tasks: BackgroundTasks, user: dict = Depends(get_current_user)):
     if user.get("email_verified"):
         raise HTTPException(status_code=400, detail="Email already verified")
     
@@ -397,6 +390,7 @@ async def resend_verification(user: dict = Depends(get_current_user)):
         {"$set": {"verification_token": verification_token}}
     )
     
+    # background_tasks.add_task(send_verification_email, user["email"], verification_token)
     return {"message": "Verification email sent"}
 
 @api_router.get("/auth/me", response_model=UserResponse)
@@ -630,10 +624,7 @@ async def get_public_invoice(invoice_id: str):
     paypal_settings = await db.settings.find_one({"type": "paypal"}, {"_id": 0})
     paypal_client_id = None
     if paypal_settings and paypal_settings.get("data", {}).get("client_id"):
-        try:
-            paypal_client_id = decrypt_data(paypal_settings["data"]["client_id"])
-        except Exception:
-            pass
+        paypal_client_id = decrypt_data(paypal_settings["data"]["client_id"])
     
     return {
         **invoice,
@@ -649,6 +640,63 @@ async def mark_invoice_paid(invoice_id: str, payment_id: str = Query(...)):
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Invoice not found")
     return {"message": "Invoice marked as paid"}
+
+class SendInvoiceRequest(BaseModel):
+    frontend_url: str  # The frontend URL for generating payment link
+
+@api_router.post("/invoices/{invoice_id}/send")
+async def send_invoice_email(invoice_id: str, data: SendInvoiceRequest, user: dict = Depends(require_accountant_or_admin)):
+    """Send invoice email to client with payment link"""
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    # Get branding settings
+    branding = await db.settings.find_one({"type": "branding"}, {"_id": 0})
+    company_name = branding.get("data", {}).get("company_name", "KyberBusiness") if branding else "KyberBusiness"
+    
+    # Get default email template
+    template = await db.email_templates.find_one({"is_default": True}, {"_id": 0})
+    if not template:
+        # Use first template or default
+        templates = await db.email_templates.find({}, {"_id": 0}).to_list(1)
+        template = templates[0] if templates else {
+            "subject": "Invoice #{invoice_number} from " + company_name,
+            "body_html": """
+<div style="font-family: Georgia, serif; max-width: 600px; margin: 0 auto; padding: 40px; background: #ffffff; border: 1px solid #e0e0e0;">
+    <h1 style="color: #333; border-bottom: 2px solid #06b6d4; padding-bottom: 10px;">INVOICE</h1>
+    <p style="color: #666;">Invoice Number: <strong>#{invoice_number}</strong></p>
+    <p style="color: #666;">Amount Due: <strong>${total}</strong></p>
+    <p style="color: #666;">Due Date: <strong>{due_date}</strong></p>
+    <div style="margin: 30px 0;">
+        <a href="{payment_link}" style="background: #06b6d4; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px;">Pay Now</a>
+    </div>
+    <p style="color: #999; font-size: 12px;">Thank you for your business.</p>
+</div>
+            """
+        }
+    
+    # Build payment link
+    payment_link = f"{data.frontend_url}/pay/{invoice_id}"
+    
+    # Format the email
+    subject = template["subject"].replace("{invoice_number}", invoice["invoice_number"])
+    body = template["body_html"]
+    body = body.replace("{invoice_number}", invoice["invoice_number"])
+    body = body.replace("#{invoice_number}", invoice["invoice_number"])
+    body = body.replace("{total}", f"{invoice['total']:.2f}")
+    body = body.replace("${total}", f"${invoice['total']:.2f}")
+    body = body.replace("{due_date}", invoice.get("due_date") or "Upon Receipt")
+    body = body.replace("{payment_link}", payment_link)
+    
+    # Send the email
+    await send_email(invoice["client_email"], subject, body)
+    
+    # Update invoice status to sent if it was draft
+    if invoice["status"] == "draft":
+        await db.invoices.update_one({"id": invoice_id}, {"$set": {"status": "sent"}})
+    
+    return {"message": "Invoice sent successfully", "payment_link": payment_link}
 
 # ==================== EXPENSES ROUTES ====================
 
@@ -816,24 +864,6 @@ async def delete_vendor(vendor_id: str, user: dict = Depends(require_accountant_
 
 # ==================== SETTINGS ROUTES ====================
 
-@api_router.post("/settings/general")
-async def save_general_settings(data: GeneralSettings, user: dict = Depends(require_admin)):
-    settings_doc = {
-        "type": "general",
-        "data": {
-            "require_email_verification": data.require_email_verification
-        }
-    }
-    await db.settings.update_one({"type": "general"}, {"$set": settings_doc}, upsert=True)
-    return {"message": "General settings saved successfully"}
-
-@api_router.get("/settings/general")
-async def get_general_settings_endpoint(user: dict = Depends(require_admin)):
-    settings = await db.settings.find_one({"type": "general"}, {"_id": 0})
-    if not settings:
-        return {"require_email_verification": False}
-    return settings.get("data", {"require_email_verification": False})
-
 @api_router.post("/settings/smtp")
 async def save_smtp_settings(data: SMTPSettings, user: dict = Depends(require_admin)):
     encrypted_password = encrypt_data(data.password)
@@ -903,19 +933,15 @@ DEFAULT_TEMPLATES = [
         "id": "default-professional",
         "name": "Professional Invoice",
         "theme": "professional",
-        "subject": "Invoice #{invoice_number} from {company_name}",
+        "subject": "Invoice #{invoice_number} from KyberBusiness",
         "body_html": """
 <div style="font-family: Georgia, serif; max-width: 600px; margin: 0 auto; padding: 40px; background: #ffffff; border: 1px solid #e0e0e0;">
-    <div style="text-align: center; margin-bottom: 30px;">
-        {logo_html}
-        <h2 style="color: #333; margin: 10px 0 0;">{company_name}</h2>
-    </div>
-    <h1 style="color: #333; border-bottom: 2px solid {primary_color}; padding-bottom: 10px;">INVOICE</h1>
+    <h1 style="color: #333; border-bottom: 2px solid #06b6d4; padding-bottom: 10px;">INVOICE</h1>
     <p style="color: #666;">Invoice Number: <strong>#{invoice_number}</strong></p>
     <p style="color: #666;">Amount Due: <strong>${total}</strong></p>
     <p style="color: #666;">Due Date: <strong>{due_date}</strong></p>
     <div style="margin: 30px 0;">
-        <a href="{payment_link}" style="background: {primary_color}; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px;">Pay Now</a>
+        <a href="{payment_link}" style="background: #06b6d4; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px;">Pay Now</a>
     </div>
     <p style="color: #999; font-size: 12px;">Thank you for your business.</p>
 </div>
@@ -926,21 +952,19 @@ DEFAULT_TEMPLATES = [
         "id": "default-modern",
         "name": "Modern Invoice",
         "theme": "modern",
-        "subject": "Your Invoice #{invoice_number} from {company_name} is Ready",
+        "subject": "Your Invoice #{invoice_number} is Ready",
         "body_html": """
 <div style="font-family: 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto; padding: 0;">
-    <div style="background: linear-gradient(135deg, {primary_color}, {secondary_color}); padding: 30px; text-align: center;">
-        {logo_html}
-        <h1 style="color: white; margin: 10px 0 0;">{company_name}</h1>
-        <p style="color: rgba(255,255,255,0.8); margin: 5px 0;">Invoice Ready</p>
+    <div style="background: linear-gradient(135deg, #06b6d4, #d946ef); padding: 30px; text-align: center;">
+        <h1 style="color: white; margin: 0;">Invoice Ready</h1>
     </div>
     <div style="padding: 30px; background: #f8f9fa;">
         <p style="font-size: 18px; color: #333;">Invoice <strong>#{invoice_number}</strong></p>
         <div style="background: white; padding: 20px; border-radius: 10px; margin: 20px 0;">
-            <p style="margin: 0; font-size: 24px; color: {primary_color};"><strong>${total}</strong></p>
+            <p style="margin: 0; font-size: 24px; color: #06b6d4;"><strong>${total}</strong></p>
             <p style="margin: 5px 0 0; color: #666;">Due: {due_date}</p>
         </div>
-        <a href="{payment_link}" style="display: block; background: {secondary_color}; color: white; padding: 15px; text-decoration: none; border-radius: 25px; text-align: center;">Pay Invoice</a>
+        <a href="{payment_link}" style="display: block; background: #d946ef; color: white; padding: 15px; text-decoration: none; border-radius: 25px; text-align: center;">Pay Invoice</a>
     </div>
 </div>
         """,
@@ -950,18 +974,15 @@ DEFAULT_TEMPLATES = [
         "id": "default-minimal",
         "name": "Minimal Invoice",
         "theme": "minimal",
-        "subject": "Invoice #{invoice_number} from {company_name}",
+        "subject": "Invoice #{invoice_number}",
         "body_html": """
 <div style="font-family: -apple-system, sans-serif; max-width: 500px; margin: 0 auto; padding: 40px;">
-    <div style="margin-bottom: 30px;">
-        {logo_html}
-    </div>
     <p style="color: #333; margin-bottom: 30px;">Hi,</p>
     <p style="color: #666;">Your invoice <strong>#{invoice_number}</strong> for <strong>${total}</strong> is due on {due_date}.</p>
     <p style="margin: 30px 0;">
-        <a href="{payment_link}" style="color: {primary_color}; text-decoration: none; border-bottom: 2px solid {primary_color}; padding-bottom: 2px;">Pay now</a>
+        <a href="{payment_link}" style="color: #06b6d4; text-decoration: none; border-bottom: 2px solid #06b6d4; padding-bottom: 2px;">Pay now →</a>
     </p>
-    <p style="color: #999; font-size: 14px;">Thanks,<br>{company_name}</p>
+    <p style="color: #999; font-size: 14px;">Thanks,<br>KyberBusiness</p>
 </div>
         """,
         "is_default": False
@@ -970,18 +991,17 @@ DEFAULT_TEMPLATES = [
         "id": "default-bold",
         "name": "Bold Invoice",
         "theme": "bold",
-        "subject": "INVOICE #{invoice_number} from {company_name} - Action Required",
+        "subject": "💎 INVOICE #{invoice_number} - Action Required",
         "body_html": """
 <div style="font-family: 'Impact', sans-serif; max-width: 600px; margin: 0 auto; background: #0f172a; padding: 0;">
-    <div style="background: {secondary_color}; padding: 20px; text-align: center;">
-        {logo_html}
-        <h1 style="color: white; margin: 10px 0 0; font-size: 28px; letter-spacing: 3px;">{company_name}</h1>
+    <div style="background: #d946ef; padding: 20px; text-align: center;">
+        <h1 style="color: white; margin: 0; font-size: 28px; letter-spacing: 3px;">INVOICE</h1>
     </div>
     <div style="padding: 30px; text-align: center;">
-        <p style="color: {primary_color}; font-size: 48px; margin: 0;"><strong>${total}</strong></p>
+        <p style="color: #06b6d4; font-size: 48px; margin: 0;"><strong>${total}</strong></p>
         <p style="color: #94a3b8; font-size: 14px;">Invoice #{invoice_number}</p>
         <p style="color: #94a3b8;">Due: {due_date}</p>
-        <a href="{payment_link}" style="display: inline-block; margin-top: 20px; background: {primary_color}; color: #0f172a; padding: 20px 40px; text-decoration: none; font-weight: bold; font-size: 18px;">PAY NOW</a>
+        <a href="{payment_link}" style="display: inline-block; margin-top: 20px; background: #06b6d4; color: #0f172a; padding: 20px 40px; text-decoration: none; font-weight: bold; font-size: 18px;">PAY NOW</a>
     </div>
 </div>
         """,
@@ -991,12 +1011,11 @@ DEFAULT_TEMPLATES = [
         "id": "default-classic",
         "name": "Classic Invoice",
         "theme": "classic",
-        "subject": "Invoice #{invoice_number} from {company_name} - Payment Request",
+        "subject": "Invoice #{invoice_number} - Payment Request",
         "body_html": """
 <div style="font-family: 'Times New Roman', serif; max-width: 600px; margin: 0 auto; padding: 40px; border: 3px double #333;">
     <div style="text-align: center; border-bottom: 1px solid #333; padding-bottom: 20px;">
-        {logo_html}
-        <h1 style="color: #333; margin: 10px 0 0; font-style: italic;">{company_name}</h1>
+        <h1 style="color: #333; margin: 0; font-style: italic;">KyberBusiness</h1>
         <p style="color: #666; margin: 5px 0;">Invoice</p>
     </div>
     <div style="padding: 30px 0;">
@@ -1007,7 +1026,7 @@ DEFAULT_TEMPLATES = [
         </table>
     </div>
     <div style="text-align: center; padding-top: 20px; border-top: 1px solid #333;">
-        <a href="{payment_link}" style="color: {primary_color}; text-decoration: none;">Click here to pay</a>
+        <a href="{payment_link}" style="color: #06b6d4; text-decoration: none;">Click here to pay</a>
     </div>
 </div>
         """,
@@ -1019,6 +1038,7 @@ DEFAULT_TEMPLATES = [
 async def list_email_templates(user: dict = Depends(get_current_user)):
     templates = await db.email_templates.find({}, {"_id": 0}).to_list(100)
     if not templates:
+        # Initialize with defaults
         for t in DEFAULT_TEMPLATES:
             await db.email_templates.insert_one(t)
         templates = DEFAULT_TEMPLATES
@@ -1128,6 +1148,7 @@ async def get_branding_settings(user: dict = Depends(get_current_user)):
 
 @api_router.get("/public/branding")
 async def get_public_branding():
+    """Public endpoint for branding (used on public invoice pages)"""
     settings = await db.settings.find_one({"type": "branding"}, {"_id": 0})
     if not settings:
         return {
@@ -1144,6 +1165,11 @@ async def get_public_branding():
         }
     
     data = settings.get("data", {})
+    logo_url = data.get("logo_url")
+    # Convert authenticated URL to public URL for public access
+    if logo_url and logo_url.startswith("/uploads/"):
+        logo_url = "/public" + logo_url
+    
     return {
         "company_name": data.get("company_name", "KyberBusiness"),
         "primary_color": data.get("primary_color", "#06b6d4"),
@@ -1154,7 +1180,7 @@ async def get_public_branding():
         "phone": data.get("phone", ""),
         "email": data.get("email", ""),
         "website": data.get("website", ""),
-        "logo_url": data.get("logo_url")
+        "logo_url": logo_url
     }
 
 @api_router.post("/settings/branding/logo")
@@ -1171,43 +1197,30 @@ async def upload_logo(file: UploadFile = File(...), user: dict = Depends(require
     filename = f"company_logo.{file_ext}"
     filepath = UPLOAD_DIR / filename
     
-    # Ensure the directory exists
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    
     async with aiofiles.open(filepath, "wb") as f:
         await f.write(contents)
     
-    # Store just the filename, the frontend will construct the full URL
-    logo_url = f"/api/uploads/{filename}"
+    # Store URL without /api prefix since frontend adds it
+    logo_url = f"/uploads/{filename}"
     
-    # First ensure the branding document exists
-    existing = await db.settings.find_one({"type": "branding"})
-    if not existing:
-        await db.settings.insert_one({
-            "type": "branding",
-            "data": {
-                "company_name": "KyberBusiness",
-                "primary_color": "#06b6d4",
-                "secondary_color": "#d946ef",
-                "accent_color": "#10b981",
-                "logo_url": logo_url
-            }
-        })
-    else:
-        await db.settings.update_one(
-            {"type": "branding"},
-            {"$set": {"data.logo_url": logo_url}}
-        )
+    # Update branding settings with logo URL
+    await db.settings.update_one(
+        {"type": "branding"},
+        {"$set": {"data.logo_url": logo_url}},
+        upsert=True
+    )
     
     return {"logo_url": logo_url}
 
 @api_router.delete("/settings/branding/logo")
 async def delete_logo(user: dict = Depends(require_admin)):
+    # Remove logo URL from settings
     await db.settings.update_one(
         {"type": "branding"},
         {"$unset": {"data.logo_url": ""}}
     )
     
+    # Delete logo files
     import glob
     for f in glob.glob(str(UPLOAD_DIR / "company_logo.*")):
         try:
@@ -1225,6 +1238,7 @@ async def get_report_summary(
     end_date: str = Query(...),
     user: dict = Depends(get_current_user)
 ):
+    # Revenue from paid invoices
     invoices = await db.invoices.find({
         "status": "paid",
         "paid_at": {"$gte": start_date, "$lte": end_date}
@@ -1232,16 +1246,20 @@ async def get_report_summary(
     
     total_revenue = sum(inv.get("total", 0) for inv in invoices)
     
+    # Expenses
     expenses = await db.expenses.find({
         "date": {"$gte": start_date, "$lte": end_date}
     }, {"_id": 0}).to_list(10000)
     
     total_expenses = sum(exp.get("amount", 0) for exp in expenses)
+    
+    # Profit/Loss
     profit_loss = total_revenue - total_expenses
     
+    # Monthly breakdown for charts
     monthly_data = {}
     for inv in invoices:
-        month = inv.get("paid_at", "")[:7]
+        month = inv.get("paid_at", "")[:7]  # YYYY-MM
         if month not in monthly_data:
             monthly_data[month] = {"revenue": 0, "expenses": 0}
         monthly_data[month]["revenue"] += inv.get("total", 0)
@@ -1257,6 +1275,7 @@ async def get_report_summary(
         for k, v in sorted(monthly_data.items())
     ]
     
+    # Expense breakdown by category
     category_breakdown = {}
     for exp in expenses:
         cat = exp.get("category_name", "Uncategorized")
@@ -1278,23 +1297,28 @@ async def get_report_summary(
 
 @api_router.get("/reports/dashboard")
 async def get_dashboard_data(user: dict = Depends(get_current_user)):
+    # Get counts and recent items
     invoice_count = await db.invoices.count_documents({})
     quote_count = await db.quotes.count_documents({})
     expense_count = await db.expenses.count_documents({})
     
+    # Pending invoices
     pending_invoices = await db.invoices.find(
         {"status": {"$in": ["draft", "sent"]}}, 
         {"_id": 0}
     ).sort("created_at", -1).limit(5).to_list(5)
     
+    # Recent expenses
     recent_expenses = await db.expenses.find({}, {"_id": 0}).sort("date", -1).limit(5).to_list(5)
     
+    # Total outstanding
     outstanding_invoices = await db.invoices.find(
         {"status": {"$in": ["draft", "sent", "overdue"]}},
         {"_id": 0}
     ).to_list(1000)
     total_outstanding = sum(inv.get("total", 0) for inv in outstanding_invoices)
     
+    # This month's revenue
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1).isoformat()[:10]
     paid_this_month = await db.invoices.find({
@@ -1313,520 +1337,27 @@ async def get_dashboard_data(user: dict = Depends(get_current_user)):
         "recent_expenses": recent_expenses
     }
 
-# ==================== PDF GENERATION ====================
-
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch, mm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
-from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
-from io import BytesIO
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.application import MIMEApplication
-import aiosmtplib
-
-async def get_branding_data():
-    """Get branding settings for PDF generation"""
-    settings = await db.settings.find_one({"type": "branding"}, {"_id": 0})
-    if not settings:
-        return {
-            "company_name": "KyberBusiness",
-            "primary_color": "#06b6d4",
-            "secondary_color": "#d946ef",
-            "accent_color": "#10b981",
-            "tagline": "",
-            "address": "",
-            "phone": "",
-            "email": "",
-            "website": "",
-            "logo_url": None
-        }
-    return settings.get("data", {})
-
-def hex_to_rgb(hex_color):
-    """Convert hex color to RGB tuple for reportlab"""
-    hex_color = hex_color.lstrip('#')
-    return tuple(int(hex_color[i:i+2], 16)/255 for i in (0, 2, 4))
-
-def create_invoice_pdf(invoice: dict, branding: dict) -> bytes:
-    """Generate PDF for invoice using reportlab"""
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
-    
-    company_name = branding.get("company_name", "KyberBusiness")
-    primary_color = colors.Color(*hex_to_rgb(branding.get("primary_color", "#06b6d4")))
-    
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name='CompanyName', fontSize=18, textColor=primary_color, spaceAfter=6, fontName='Helvetica-Bold'))
-    styles.add(ParagraphStyle(name='InvoiceTitle', fontSize=28, textColor=primary_color, alignment=TA_RIGHT, fontName='Helvetica-Bold'))
-    styles.add(ParagraphStyle(name='SectionHeader', fontSize=10, textColor=colors.grey, spaceAfter=4, fontName='Helvetica-Bold'))
-    styles.add(ParagraphStyle(name='ClientName', fontSize=14, fontName='Helvetica-Bold', spaceAfter=4))
-    styles.add(ParagraphStyle(name='Normal_Right', fontSize=10, alignment=TA_RIGHT))
-    styles.add(ParagraphStyle(name='Total', fontSize=14, fontName='Helvetica-Bold', alignment=TA_RIGHT, textColor=primary_color))
-    
-    elements = []
-    
-    # Header section
-    header_data = [
-        [Paragraph(company_name, styles['CompanyName']), Paragraph('INVOICE', styles['InvoiceTitle'])],
-    ]
-    
-    company_info = []
-    if branding.get("address"):
-        company_info.append(branding["address"])
-    if branding.get("phone"):
-        company_info.append(branding["phone"])
-    if branding.get("email"):
-        company_info.append(branding["email"])
-    
-    if company_info:
-        header_data.append([Paragraph('<br/>'.join(company_info), styles['Normal']), 
-                           Paragraph(f"<b>{invoice.get('invoice_number', '')}</b>", styles['Normal_Right'])])
-    else:
-        header_data.append(['', Paragraph(f"<b>{invoice.get('invoice_number', '')}</b>", styles['Normal_Right'])])
-    
-    header_table = Table(header_data, colWidths=[300, 200])
-    header_table.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
-    ]))
-    elements.append(header_table)
-    elements.append(Spacer(1, 20))
-    
-    # Bill To section
-    elements.append(Paragraph('BILL TO', styles['SectionHeader']))
-    elements.append(Paragraph(invoice.get('client_name', ''), styles['ClientName']))
-    elements.append(Paragraph(invoice.get('client_email', ''), styles['Normal']))
-    if invoice.get('client_address'):
-        elements.append(Paragraph(invoice['client_address'], styles['Normal']))
-    elements.append(Spacer(1, 20))
-    
-    # Invoice details
-    details_data = [
-        ['Date:', invoice.get('created_at', '')[:10]],
-        ['Due Date:', invoice.get('due_date', 'N/A') or 'N/A'],
-        ['Status:', invoice.get('status', 'draft').upper()],
-    ]
-    details_table = Table(details_data, colWidths=[80, 150])
-    details_table.setStyle(TableStyle([
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('TEXTCOLOR', (0, 0), (0, -1), colors.grey),
-    ]))
-    elements.append(details_table)
-    elements.append(Spacer(1, 20))
-    
-    # Line items table
-    items_data = [['Description', 'Qty', 'Price', 'Total']]
-    for item in invoice.get('items', []):
-        line_total = item.get('quantity', 1) * item.get('price', 0)
-        items_data.append([
-            item.get('description', ''),
-            str(item.get('quantity', 1)),
-            f"${item.get('price', 0):.2f}",
-            f"${line_total:.2f}"
-        ])
-    
-    items_table = Table(items_data, colWidths=[280, 60, 80, 80])
-    items_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), primary_color),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('TOPPADDING', (0, 0), (-1, 0), 12),
-        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 1), (-1, -1), 10),
-        ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
-        ('TOPPADDING', (0, 1), (-1, -1), 8),
-        ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.lightgrey),
-        ('LINEBELOW', (0, -1), (-1, -1), 1, colors.grey),
-    ]))
-    elements.append(items_table)
-    elements.append(Spacer(1, 20))
-    
-    # Totals
-    totals_data = [
-        ['Subtotal:', f"${invoice.get('subtotal', 0):.2f}"],
-        ['Tax (10%):', f"${invoice.get('tax', 0):.2f}"],
-        ['TOTAL:', f"${invoice.get('total', 0):.2f}"],
-    ]
-    totals_table = Table(totals_data, colWidths=[400, 100])
-    totals_table.setStyle(TableStyle([
-        ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
-        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('TEXTCOLOR', (0, 0), (0, -1), colors.grey),
-        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, -1), (-1, -1), 12),
-        ('TEXTCOLOR', (-1, -1), (-1, -1), primary_color),
-        ('LINEABOVE', (0, -1), (-1, -1), 1, primary_color),
-        ('TOPPADDING', (0, -1), (-1, -1), 8),
-    ]))
-    elements.append(totals_table)
-    
-    # Notes
-    if invoice.get('notes'):
-        elements.append(Spacer(1, 30))
-        elements.append(Paragraph('NOTES', styles['SectionHeader']))
-        elements.append(Paragraph(invoice['notes'], styles['Normal']))
-    
-    # Footer
-    elements.append(Spacer(1, 40))
-    elements.append(Paragraph(f'<para alignment="center"><font color="grey">Thank you for your business! • {company_name}</font></para>', styles['Normal']))
-    
-    doc.build(elements)
-    return buffer.getvalue()
-
-def create_quote_pdf(quote: dict, branding: dict) -> bytes:
-    """Generate PDF for quote using reportlab"""
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
-    
-    company_name = branding.get("company_name", "KyberBusiness")
-    secondary_color = colors.Color(*hex_to_rgb(branding.get("secondary_color", "#d946ef")))
-    
-    styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name='CompanyName', fontSize=18, textColor=secondary_color, spaceAfter=6, fontName='Helvetica-Bold'))
-    styles.add(ParagraphStyle(name='QuoteTitle', fontSize=28, textColor=secondary_color, alignment=TA_RIGHT, fontName='Helvetica-Bold'))
-    styles.add(ParagraphStyle(name='SectionHeader', fontSize=10, textColor=colors.grey, spaceAfter=4, fontName='Helvetica-Bold'))
-    styles.add(ParagraphStyle(name='ClientName', fontSize=14, fontName='Helvetica-Bold', spaceAfter=4))
-    styles.add(ParagraphStyle(name='Normal_Right', fontSize=10, alignment=TA_RIGHT))
-    styles.add(ParagraphStyle(name='Total', fontSize=14, fontName='Helvetica-Bold', alignment=TA_RIGHT, textColor=secondary_color))
-    
-    elements = []
-    
-    # Header section
-    header_data = [
-        [Paragraph(company_name, styles['CompanyName']), Paragraph('QUOTE', styles['QuoteTitle'])],
-    ]
-    
-    company_info = []
-    if branding.get("address"):
-        company_info.append(branding["address"])
-    if branding.get("phone"):
-        company_info.append(branding["phone"])
-    if branding.get("email"):
-        company_info.append(branding["email"])
-    
-    if company_info:
-        header_data.append([Paragraph('<br/>'.join(company_info), styles['Normal']), 
-                           Paragraph(f"<b>{quote.get('quote_number', '')}</b>", styles['Normal_Right'])])
-    else:
-        header_data.append(['', Paragraph(f"<b>{quote.get('quote_number', '')}</b>", styles['Normal_Right'])])
-    
-    header_table = Table(header_data, colWidths=[300, 200])
-    header_table.setStyle(TableStyle([
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
-    ]))
-    elements.append(header_table)
-    elements.append(Spacer(1, 20))
-    
-    # Prepared For section
-    elements.append(Paragraph('PREPARED FOR', styles['SectionHeader']))
-    elements.append(Paragraph(quote.get('client_name', ''), styles['ClientName']))
-    elements.append(Paragraph(quote.get('client_email', ''), styles['Normal']))
-    if quote.get('client_address'):
-        elements.append(Paragraph(quote['client_address'], styles['Normal']))
-    elements.append(Spacer(1, 20))
-    
-    # Quote details
-    details_data = [
-        ['Date:', quote.get('created_at', '')[:10]],
-        ['Valid Until:', quote.get('valid_until', 'N/A') or 'N/A'],
-        ['Status:', quote.get('status', 'draft').upper()],
-    ]
-    details_table = Table(details_data, colWidths=[80, 150])
-    details_table.setStyle(TableStyle([
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('TEXTCOLOR', (0, 0), (0, -1), colors.grey),
-    ]))
-    elements.append(details_table)
-    elements.append(Spacer(1, 20))
-    
-    # Line items table
-    items_data = [['Description', 'Qty', 'Price', 'Total']]
-    for item in quote.get('items', []):
-        line_total = item.get('quantity', 1) * item.get('price', 0)
-        items_data.append([
-            item.get('description', ''),
-            str(item.get('quantity', 1)),
-            f"${item.get('price', 0):.2f}",
-            f"${line_total:.2f}"
-        ])
-    
-    items_table = Table(items_data, colWidths=[280, 60, 80, 80])
-    items_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), secondary_color),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('TOPPADDING', (0, 0), (-1, 0), 12),
-        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 1), (-1, -1), 10),
-        ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
-        ('TOPPADDING', (0, 1), (-1, -1), 8),
-        ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.lightgrey),
-        ('LINEBELOW', (0, -1), (-1, -1), 1, colors.grey),
-    ]))
-    elements.append(items_table)
-    elements.append(Spacer(1, 20))
-    
-    # Totals
-    totals_data = [
-        ['Subtotal:', f"${quote.get('subtotal', 0):.2f}"],
-        ['Tax (10%):', f"${quote.get('tax', 0):.2f}"],
-        ['TOTAL:', f"${quote.get('total', 0):.2f}"],
-    ]
-    totals_table = Table(totals_data, colWidths=[400, 100])
-    totals_table.setStyle(TableStyle([
-        ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
-        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('TEXTCOLOR', (0, 0), (0, -1), colors.grey),
-        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, -1), (-1, -1), 12),
-        ('TEXTCOLOR', (-1, -1), (-1, -1), secondary_color),
-        ('LINEABOVE', (0, -1), (-1, -1), 1, secondary_color),
-        ('TOPPADDING', (0, -1), (-1, -1), 8),
-    ]))
-    elements.append(totals_table)
-    
-    # Notes
-    if quote.get('notes'):
-        elements.append(Spacer(1, 30))
-        elements.append(Paragraph('NOTES', styles['SectionHeader']))
-        elements.append(Paragraph(quote['notes'], styles['Normal']))
-    
-    # Footer
-    elements.append(Spacer(1, 40))
-    elements.append(Paragraph(f'<para alignment="center"><font color="grey">Thank you for considering our services! • {company_name}</font></para>', styles['Normal']))
-    
-    doc.build(elements)
-    return buffer.getvalue()
-
-async def send_email_with_attachment(
-    to_email: str,
-    subject: str,
-    body_html: str,
-    attachment_data: bytes,
-    attachment_filename: str
-):
-    """Send email with PDF attachment using configured SMTP"""
-    smtp_settings = await db.settings.find_one({"type": "smtp"}, {"_id": 0})
-    if not smtp_settings or not smtp_settings.get("data"):
-        raise HTTPException(status_code=400, detail="SMTP not configured. Please configure SMTP settings first.")
-    
-    smtp_data = smtp_settings["data"]
-    
-    # Create message
-    msg = MIMEMultipart()
-    msg["From"] = f"{smtp_data.get('from_name', 'KyberBusiness')} <{smtp_data.get('from_email')}>"
-    msg["To"] = to_email
-    msg["Subject"] = subject
-    
-    # Attach HTML body
-    msg.attach(MIMEText(body_html, "html"))
-    
-    # Attach PDF
-    pdf_attachment = MIMEApplication(attachment_data, _subtype="pdf")
-    pdf_attachment.add_header("Content-Disposition", "attachment", filename=attachment_filename)
-    msg.attach(pdf_attachment)
-    
-    # Send email
-    try:
-        decrypted_password = decrypt_data(smtp_data["password"])
-        await aiosmtplib.send(
-            msg,
-            hostname=smtp_data["host"],
-            port=smtp_data["port"],
-            username=smtp_data["username"],
-            password=decrypted_password,
-            start_tls=smtp_data.get("use_tls", True)
-        )
-    except Exception as e:
-        logger.error(f"Failed to send email: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
-
-from fastapi.responses import Response
-async def download_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_user)):
-    """Download invoice as PDF"""
-    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
-    
-    branding = await get_branding_data()
-    try:
-        pdf_data = create_invoice_pdf(invoice, branding)
-    except Exception as e:
-        logger.error(f"PDF generation failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
-    
-    return Response(
-        content=pdf_data,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f"attachment; filename={invoice['invoice_number']}.pdf"
-        }
-    )
-
-@api_router.get("/quotes/{quote_id}/pdf")
-async def download_quote_pdf(quote_id: str, user: dict = Depends(get_current_user)):
-    """Download quote as PDF"""
-    quote = await db.quotes.find_one({"id": quote_id}, {"_id": 0})
-    if not quote:
-        raise HTTPException(status_code=404, detail="Quote not found")
-    
-    branding = await get_branding_data()
-    try:
-        pdf_data = create_quote_pdf(quote, branding)
-    except Exception as e:
-        logger.error(f"PDF generation failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
-    
-    return Response(
-        content=pdf_data,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f"attachment; filename={quote['quote_number']}.pdf"
-        }
-    )
-    
-    return Response(
-        content=pdf_data,
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f"attachment; filename={quote['quote_number']}.pdf"
-        }
-    )
-
-class EmailInvoiceRequest(BaseModel):
-    custom_message: Optional[str] = ""
-
-@api_router.post("/invoices/{invoice_id}/send-email")
-async def send_invoice_email(invoice_id: str, data: EmailInvoiceRequest, user: dict = Depends(require_accountant_or_admin)):
-    """Send invoice PDF via email to customer"""
-    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
-    
-    branding = await get_branding_data()
-    company_name = branding.get("company_name", "KyberBusiness")
-    primary_color = branding.get("primary_color", "#06b6d4")
-    
-    # Generate PDF using reportlab
-    pdf_data = create_invoice_pdf(invoice, branding)
-    
-    # Build email body
-    custom_msg = f"<p>{data.custom_message}</p>" if data.custom_message else ""
-    email_body = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <h2 style="color: {primary_color};">Invoice from {company_name}</h2>
-        {custom_msg}
-        <p>Please find attached invoice <strong>{invoice['invoice_number']}</strong> for <strong>${invoice['total']:.2f}</strong>.</p>
-        <p>Due Date: {invoice.get('due_date', 'N/A') or 'N/A'}</p>
-        <p style="color: #666; font-size: 14px; margin-top: 30px;">
-            Thank you for your business!<br>
-            {company_name}
-        </p>
-    </div>
-    """
-    
-    await send_email_with_attachment(
-        to_email=invoice["client_email"],
-        subject=f"Invoice {invoice['invoice_number']} from {company_name}",
-        body_html=email_body,
-        attachment_data=pdf_data,
-        attachment_filename=f"{invoice['invoice_number']}.pdf"
-    )
-    
-    # Update invoice status to sent if it was draft
-    if invoice.get("status") == "draft":
-        await db.invoices.update_one({"id": invoice_id}, {"$set": {"status": "sent"}})
-    
-    return {"message": f"Invoice sent to {invoice['client_email']}"}
-
-class EmailQuoteRequest(BaseModel):
-    custom_message: Optional[str] = ""
-
-@api_router.post("/quotes/{quote_id}/send-email")
-async def send_quote_email(quote_id: str, data: EmailQuoteRequest, user: dict = Depends(require_accountant_or_admin)):
-    """Send quote PDF via email to customer"""
-    quote = await db.quotes.find_one({"id": quote_id}, {"_id": 0})
-    if not quote:
-        raise HTTPException(status_code=404, detail="Quote not found")
-    
-    branding = await get_branding_data()
-    company_name = branding.get("company_name", "KyberBusiness")
-    secondary_color = branding.get("secondary_color", "#d946ef")
-    
-    # Generate PDF using reportlab
-    pdf_data = create_quote_pdf(quote, branding)
-    
-    # Build email body
-    custom_msg = f"<p>{data.custom_message}</p>" if data.custom_message else ""
-    email_body = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <h2 style="color: {secondary_color};">Quote from {company_name}</h2>
-        {custom_msg}
-        <p>Please find attached quote <strong>{quote['quote_number']}</strong> for <strong>${quote['total']:.2f}</strong>.</p>
-        <p>Valid Until: {quote.get('valid_until', 'N/A') or 'N/A'}</p>
-        <p>Please review and let us know if you'd like to proceed or if you have any questions.</p>
-        <p style="color: #666; font-size: 14px; margin-top: 30px;">
-            Thank you for considering our services!<br>
-            {company_name}
-        </p>
-    </div>
-    """
-    
-    await send_email_with_attachment(
-        to_email=quote["client_email"],
-        subject=f"Quote {quote['quote_number']} from {company_name}",
-        body_html=email_body,
-        attachment_data=pdf_data,
-        attachment_filename=f"{quote['quote_number']}.pdf"
-    )
-    
-    # Update quote status to sent if it was draft
-    if quote.get("status") == "draft":
-        await db.quotes.update_one({"id": quote_id}, {"$set": {"status": "sent"}})
-    
-    return {"message": f"Quote sent to {quote['client_email']}"}
-
 # ==================== FILE SERVING ====================
 
+from fastapi.responses import FileResponse
+
 @api_router.get("/uploads/{filename}")
-async def serve_upload(filename: str):
-    """Serve uploaded files like logos and receipts"""
-    logger.info(f"Serving file request: {filename}")
+async def serve_upload(filename: str, user: dict = Depends(get_current_user)):
     filepath = UPLOAD_DIR / filename
-    logger.info(f"Looking for file at: {filepath}")
-    logger.info(f"UPLOAD_DIR is: {UPLOAD_DIR}")
-    logger.info(f"File exists: {filepath.exists()}")
-    
     if not filepath.exists():
-        logger.error(f"File not found: {filepath}")
-        # List contents of upload dir for debugging
-        try:
-            files = list(UPLOAD_DIR.iterdir())
-            logger.info(f"Files in upload dir: {files}")
-        except Exception as e:
-            logger.error(f"Error listing upload dir: {e}")
-        raise HTTPException(status_code=404, detail=f"File not found: {filename}")
-    
-    logger.info(f"Serving file: {filepath}")
-    return FileResponse(
-        path=str(filepath),
-        filename=filename,
-        media_type="application/octet-stream"
-    )
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(filepath)
+
+@api_router.get("/public/uploads/{filename}")
+async def serve_public_upload(filename: str):
+    """Public endpoint for serving logos and other public assets"""
+    # Only allow company logo files to be served publicly
+    if not filename.startswith("company_logo"):
+        raise HTTPException(status_code=403, detail="Access denied")
+    filepath = UPLOAD_DIR / filename
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(filepath)
 
 # ==================== HEALTH CHECK ====================
 
@@ -1840,7 +1371,7 @@ app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
     allow_methods=["*"],
     allow_headers=["*"],
 )
