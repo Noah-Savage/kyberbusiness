@@ -283,10 +283,19 @@ def calculate_totals(items: List[Dict[str, Any]]) -> tuple:
 async def send_email(to_email: str, subject: str, body_html: str):
     settings = await db.settings.find_one({"type": "smtp"}, {"_id": 0})
     if not settings:
-        raise HTTPException(status_code=400, detail="SMTP not configured")
+        raise HTTPException(status_code=400, detail="SMTP not configured. Please configure SMTP settings first.")
+    
+    smtp_config = settings.get("data", {})
+    
+    # Validate required fields
+    if not smtp_config.get("host"):
+        raise HTTPException(status_code=400, detail="SMTP host is not configured")
+    if not smtp_config.get("password"):
+        raise HTTPException(status_code=400, detail="SMTP password is not configured")
+    if not smtp_config.get("from_email"):
+        raise HTTPException(status_code=400, detail="From email is not configured")
     
     try:
-        smtp_config = settings.get("data", {})
         message = MIMEMultipart("alternative")
         message["From"] = f"{smtp_config.get('from_name', 'KyberBusiness')} <{smtp_config.get('from_email')}>"
         message["To"] = to_email
@@ -296,14 +305,20 @@ async def send_email(to_email: str, subject: str, body_html: str):
         await aiosmtplib.send(
             message,
             hostname=smtp_config.get("host"),
-            port=smtp_config.get("port"),
+            port=int(smtp_config.get("port", 587)),
             username=smtp_config.get("username"),
             password=decrypt_data(smtp_config.get("password")),
             use_tls=smtp_config.get("use_tls", True)
         )
+    except aiosmtplib.SMTPAuthenticationError as e:
+        logging.error(f"SMTP authentication failed: {e}")
+        raise HTTPException(status_code=400, detail="SMTP authentication failed. Check your SMTP credentials in settings.")
+    except aiosmtplib.SMTPConnectError as e:
+        logging.error(f"SMTP connection failed: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to connect to SMTP server: {str(e)}")
     except Exception as e:
         logging.error(f"Failed to send email: {e}")
-        raise HTTPException(status_code=500, detail="Failed to send email")
+        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
 
 # ==================== AUTH ROUTES ====================
 
