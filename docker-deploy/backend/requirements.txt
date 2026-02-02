@@ -24,7 +24,7 @@ python-multipart==0.0.21
 aiosmtplib==5.1.0
 
 # PDF Generation
-weasyprint==61.2
+reportlab==4.2.5
 
 # Utilities
 python-dotenv==1.2.1
