@@ -204,9 +204,23 @@ export function CreateInvoicePage() {
           <CardHeader className="flex flex-row items-center justify-between"><CardTitle>Line Items</CardTitle><Button type="button" variant="outline" size="sm" onClick={addItem} className="rounded-full"><Plus className="w-4 h-4 mr-1" /> Add</Button></CardHeader>
           <CardContent>
             <div className="space-y-4">{itemRows}</div>
-            <div className="mt-6 pt-6 border-t space-y-2">
+            <div className="mt-6 pt-6 border-t space-y-3">
               <div className="flex justify-between text-sm"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">{formatCurrency(subtotal)}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-muted-foreground">Tax (10%)</span><span className="font-mono">{formatCurrency(tax)}</span></div>
+              <div className="flex justify-between items-center text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">Tax Rate</span>
+                  <Input type="number" step="0.1" min="0" max="100" value={taxRate} onChange={function(e) { setTaxRate(parseFloat(e.target.value) || 0); }} className="w-20 h-8 rounded-lg text-sm" data-testid="tax-rate-input" />
+                  <span className="text-muted-foreground">%</span>
+                </div>
+                <span className="font-mono">{formatCurrency(tax)}</span>
+              </div>
+              <div className="flex justify-between items-center text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">Shipping</span>
+                  <Input type="number" step="0.01" min="0" value={shipping} onChange={function(e) { setShipping(parseFloat(e.target.value) || 0); }} className="w-24 h-8 rounded-lg text-sm" data-testid="shipping-input" />
+                </div>
+                <span className="font-mono">{formatCurrency(shipping)}</span>
+              </div>
               <div className="flex justify-between text-lg font-bold pt-2"><span>Total</span><span className="font-mono text-primary">{formatCurrency(total)}</span></div>
             </div>
           </CardContent>
