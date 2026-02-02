@@ -367,7 +367,7 @@ async def verify_email(token: str = Query(...)):
     return {"message": "Email verified successfully"}
 
 @api_router.post("/auth/resend-verification")
-async def resend_verification(user: dict = Depends(get_current_user), background_tasks: BackgroundTasks):
+async def resend_verification(background_tasks: BackgroundTasks, user: dict = Depends(get_current_user)):
     if user.get("email_verified"):
         raise HTTPException(status_code=400, detail="Email already verified")
     
