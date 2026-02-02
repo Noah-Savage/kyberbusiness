@@ -141,6 +141,17 @@ export function CreateInvoicePage() {
   const [notes, setNotes] = useState("");
   const [dueDate, setDueDate] = useState(null);
   const [status, setStatus] = useState("draft");
+  const [taxRate, setTaxRate] = useState(10.0);
+  const [shipping, setShipping] = useState(0);
+
+  // Load default tax rate from branding settings
+  useEffect(function() {
+    api.get("/settings/branding").then(function(data) {
+      if (data.default_tax_rate !== undefined) {
+        setTaxRate(data.default_tax_rate);
+      }
+    }).catch(function() {});
+  }, []);
 
   function addItem() { setItems([...items, { description: "", quantity: 1, price: 0 }]); }
   function removeItem(idx) { if (items.length > 1) setItems(items.filter(function(_, i) { return i !== idx; })); }
@@ -152,14 +163,14 @@ export function CreateInvoicePage() {
 
   let subtotal = 0;
   for (let i = 0; i < items.length; i++) { subtotal += items[i].quantity * items[i].price; }
-  const tax = subtotal * 0.1;
-  const total = subtotal + tax;
+  const tax = subtotal * (taxRate / 100);
+  const total = subtotal + tax + shipping;
 
   function handleSubmit(e) {
     e.preventDefault();
     if (!clientName || !clientEmail) { toast.error("Please fill client details"); return; }
     setLoading(true);
-    api.post("/invoices", { client_name: clientName, client_email: clientEmail, client_address: clientAddress, items: items, notes: notes, due_date: dueDate, status: status })
+    api.post("/invoices", { client_name: clientName, client_email: clientEmail, client_address: clientAddress, items: items, notes: notes, due_date: dueDate, status: status, tax_rate: taxRate, shipping: shipping })
       .then(function(invoice) { toast.success("Invoice created"); navigate("/invoices/" + invoice.id); })
       .catch(function(err) { toast.error(err.message); })
       .finally(function() { setLoading(false); });
