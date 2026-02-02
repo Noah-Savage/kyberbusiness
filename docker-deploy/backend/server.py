@@ -211,6 +211,8 @@ class BrandingSettings(BaseModel):
     phone: Optional[str] = ""
     email: Optional[str] = ""
     website: Optional[str] = ""
+    default_tax_rate: Optional[float] = 10.0
+    terms_and_conditions: Optional[str] = ""
 
 class EmailTemplateResponse(BaseModel):
     id: str
