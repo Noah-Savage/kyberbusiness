@@ -1804,14 +1804,31 @@ async def send_quote_email(quote_id: str, data: EmailQuoteRequest, user: dict = 
 
 # ==================== FILE SERVING ====================
 
-from fastapi.responses import FileResponse
-
 @api_router.get("/uploads/{filename}")
 async def serve_upload(filename: str):
+    """Serve uploaded files like logos and receipts"""
+    logger.info(f"Serving file request: {filename}")
     filepath = UPLOAD_DIR / filename
+    logger.info(f"Looking for file at: {filepath}")
+    logger.info(f"UPLOAD_DIR is: {UPLOAD_DIR}")
+    logger.info(f"File exists: {filepath.exists()}")
+    
     if not filepath.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(filepath)
+        logger.error(f"File not found: {filepath}")
+        # List contents of upload dir for debugging
+        try:
+            files = list(UPLOAD_DIR.iterdir())
+            logger.info(f"Files in upload dir: {files}")
+        except Exception as e:
+            logger.error(f"Error listing upload dir: {e}")
+        raise HTTPException(status_code=404, detail=f"File not found: {filename}")
+    
+    logger.info(f"Serving file: {filepath}")
+    return FileResponse(
+        path=str(filepath),
+        filename=filename,
+        media_type="application/octet-stream"
+    )
 
 # ==================== HEALTH CHECK ====================
 
