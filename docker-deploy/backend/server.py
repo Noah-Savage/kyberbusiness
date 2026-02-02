@@ -1132,6 +1132,11 @@ async def get_branding_settings(user: dict = Depends(get_current_user)):
         }
     
     data = settings.get("data", {})
+    logo_url = data.get("logo_url")
+    # Ensure logo URL uses public endpoint for img tag access
+    if logo_url and logo_url.startswith("/uploads/"):
+        logo_url = "/public" + logo_url
+    
     return {
         "configured": True,
         "company_name": data.get("company_name", "KyberBusiness"),
@@ -1143,7 +1148,7 @@ async def get_branding_settings(user: dict = Depends(get_current_user)):
         "phone": data.get("phone", ""),
         "email": data.get("email", ""),
         "website": data.get("website", ""),
-        "logo_url": data.get("logo_url")
+        "logo_url": logo_url
     }
 
 @api_router.get("/public/branding")
