@@ -182,7 +182,8 @@ class SMTPSettings(BaseModel):
     password: Optional[str] = None
     from_email: str
     from_name: str
-    use_tls: bool = True
+    use_tls: bool = True  # For port 465 (direct SSL)
+    use_starttls: bool = True  # For port 587 (STARTTLS)
 
 class PayPalSettings(BaseModel):
     client_id: str
