@@ -822,6 +822,12 @@ class KyberBusinessAPITester:
         self.test_branding_endpoints()
         self.test_branding_viewer_access()
         
+        # Logo upload and send invoice functionality (new tests)
+        self.test_logo_upload_functionality()
+        self.test_send_invoice_functionality()
+        self.test_public_invoice_access()
+        self.test_public_logo_serving()
+        
         # Print results
         print("\n" + "=" * 50)
         print(f"📊 Test Results: {self.tests_passed}/{self.tests_run} passed")
