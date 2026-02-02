@@ -1265,7 +1265,9 @@ async def get_branding_settings(user: dict = Depends(get_current_user)):
             "phone": "",
             "email": "",
             "website": "",
-            "logo_url": None
+            "logo_url": None,
+            "default_tax_rate": 10.0,
+            "terms_and_conditions": ""
         }
     
     data = settings.get("data", {})
@@ -1288,7 +1290,9 @@ async def get_branding_settings(user: dict = Depends(get_current_user)):
         "phone": data.get("phone", ""),
         "email": data.get("email", ""),
         "website": data.get("website", ""),
-        "logo_url": logo_url
+        "logo_url": logo_url,
+        "default_tax_rate": data.get("default_tax_rate", 10.0),
+        "terms_and_conditions": data.get("terms_and_conditions", "")
     }
 
 @api_router.get("/public/branding")
