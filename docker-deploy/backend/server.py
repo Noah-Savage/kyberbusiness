@@ -1307,7 +1307,12 @@ async def get_dashboard_data(user: dict = Depends(get_current_user)):
 
 # ==================== PDF GENERATION ====================
 
-from weasyprint import HTML, CSS
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch, mm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
+from reportlab.lib.enums import TA_LEFT, TA_RIGHT, TA_CENTER
 from io import BytesIO
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -1332,22 +1337,272 @@ async def get_branding_data():
         }
     return settings.get("data", {})
 
-def generate_invoice_pdf_html(invoice: dict, branding: dict) -> str:
-    """Generate HTML for invoice PDF"""
+def hex_to_rgb(hex_color):
+    """Convert hex color to RGB tuple for reportlab"""
+    hex_color = hex_color.lstrip('#')
+    return tuple(int(hex_color[i:i+2], 16)/255 for i in (0, 2, 4))
+
+def create_invoice_pdf(invoice: dict, branding: dict) -> bytes:
+    """Generate PDF for invoice using reportlab"""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    
     company_name = branding.get("company_name", "KyberBusiness")
-    primary_color = branding.get("primary_color", "#06b6d4")
-    secondary_color = branding.get("secondary_color", "#d946ef")
-    logo_url = branding.get("logo_url")
+    primary_color = colors.Color(*hex_to_rgb(branding.get("primary_color", "#06b6d4")))
     
-    # Build logo HTML
-    logo_html = ""
-    if logo_url:
-        logo_path = str(UPLOAD_DIR / logo_url.split("/")[-1])
-        logo_html = f'<img src="file://{logo_path}" style="max-height: 60px; max-width: 200px;" />'
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='CompanyName', fontSize=18, textColor=primary_color, spaceAfter=6, fontName='Helvetica-Bold'))
+    styles.add(ParagraphStyle(name='InvoiceTitle', fontSize=28, textColor=primary_color, alignment=TA_RIGHT, fontName='Helvetica-Bold'))
+    styles.add(ParagraphStyle(name='SectionHeader', fontSize=10, textColor=colors.grey, spaceAfter=4, fontName='Helvetica-Bold'))
+    styles.add(ParagraphStyle(name='ClientName', fontSize=14, fontName='Helvetica-Bold', spaceAfter=4))
+    styles.add(ParagraphStyle(name='Normal_Right', fontSize=10, alignment=TA_RIGHT))
+    styles.add(ParagraphStyle(name='Total', fontSize=14, fontName='Helvetica-Bold', alignment=TA_RIGHT, textColor=primary_color))
     
-    # Build items table
-    items_html = ""
-    for item in invoice.get("items", []):
+    elements = []
+    
+    # Header section
+    header_data = [
+        [Paragraph(company_name, styles['CompanyName']), Paragraph('INVOICE', styles['InvoiceTitle'])],
+    ]
+    
+    company_info = []
+    if branding.get("address"):
+        company_info.append(branding["address"])
+    if branding.get("phone"):
+        company_info.append(branding["phone"])
+    if branding.get("email"):
+        company_info.append(branding["email"])
+    
+    if company_info:
+        header_data.append([Paragraph('<br/>'.join(company_info), styles['Normal']), 
+                           Paragraph(f"<b>{invoice.get('invoice_number', '')}</b>", styles['Normal_Right'])])
+    else:
+        header_data.append(['', Paragraph(f"<b>{invoice.get('invoice_number', '')}</b>", styles['Normal_Right'])])
+    
+    header_table = Table(header_data, colWidths=[300, 200])
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+    ]))
+    elements.append(header_table)
+    elements.append(Spacer(1, 20))
+    
+    # Bill To section
+    elements.append(Paragraph('BILL TO', styles['SectionHeader']))
+    elements.append(Paragraph(invoice.get('client_name', ''), styles['ClientName']))
+    elements.append(Paragraph(invoice.get('client_email', ''), styles['Normal']))
+    if invoice.get('client_address'):
+        elements.append(Paragraph(invoice['client_address'], styles['Normal']))
+    elements.append(Spacer(1, 20))
+    
+    # Invoice details
+    details_data = [
+        ['Date:', invoice.get('created_at', '')[:10]],
+        ['Due Date:', invoice.get('due_date', 'N/A') or 'N/A'],
+        ['Status:', invoice.get('status', 'draft').upper()],
+    ]
+    details_table = Table(details_data, colWidths=[80, 150])
+    details_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('TEXTCOLOR', (0, 0), (0, -1), colors.grey),
+    ]))
+    elements.append(details_table)
+    elements.append(Spacer(1, 20))
+    
+    # Line items table
+    items_data = [['Description', 'Qty', 'Price', 'Total']]
+    for item in invoice.get('items', []):
+        line_total = item.get('quantity', 1) * item.get('price', 0)
+        items_data.append([
+            item.get('description', ''),
+            str(item.get('quantity', 1)),
+            f"${item.get('price', 0):.2f}",
+            f"${line_total:.2f}"
+        ])
+    
+    items_table = Table(items_data, colWidths=[280, 60, 80, 80])
+    items_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('TOPPADDING', (0, 0), (-1, 0), 12),
+        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+        ('TOPPADDING', (0, 1), (-1, -1), 8),
+        ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.lightgrey),
+        ('LINEBELOW', (0, -1), (-1, -1), 1, colors.grey),
+    ]))
+    elements.append(items_table)
+    elements.append(Spacer(1, 20))
+    
+    # Totals
+    totals_data = [
+        ['Subtotal:', f"${invoice.get('subtotal', 0):.2f}"],
+        ['Tax (10%):', f"${invoice.get('tax', 0):.2f}"],
+        ['TOTAL:', f"${invoice.get('total', 0):.2f}"],
+    ]
+    totals_table = Table(totals_data, colWidths=[400, 100])
+    totals_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('TEXTCOLOR', (0, 0), (0, -1), colors.grey),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, -1), (-1, -1), 12),
+        ('TEXTCOLOR', (-1, -1), (-1, -1), primary_color),
+        ('LINEABOVE', (0, -1), (-1, -1), 1, primary_color),
+        ('TOPPADDING', (0, -1), (-1, -1), 8),
+    ]))
+    elements.append(totals_table)
+    
+    # Notes
+    if invoice.get('notes'):
+        elements.append(Spacer(1, 30))
+        elements.append(Paragraph('NOTES', styles['SectionHeader']))
+        elements.append(Paragraph(invoice['notes'], styles['Normal']))
+    
+    # Footer
+    elements.append(Spacer(1, 40))
+    elements.append(Paragraph(f'<para alignment="center"><font color="grey">Thank you for your business! • {company_name}</font></para>', styles['Normal']))
+    
+    doc.build(elements)
+    return buffer.getvalue()
+
+def create_quote_pdf(quote: dict, branding: dict) -> bytes:
+    """Generate PDF for quote using reportlab"""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    
+    company_name = branding.get("company_name", "KyberBusiness")
+    secondary_color = colors.Color(*hex_to_rgb(branding.get("secondary_color", "#d946ef")))
+    
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='CompanyName', fontSize=18, textColor=secondary_color, spaceAfter=6, fontName='Helvetica-Bold'))
+    styles.add(ParagraphStyle(name='QuoteTitle', fontSize=28, textColor=secondary_color, alignment=TA_RIGHT, fontName='Helvetica-Bold'))
+    styles.add(ParagraphStyle(name='SectionHeader', fontSize=10, textColor=colors.grey, spaceAfter=4, fontName='Helvetica-Bold'))
+    styles.add(ParagraphStyle(name='ClientName', fontSize=14, fontName='Helvetica-Bold', spaceAfter=4))
+    styles.add(ParagraphStyle(name='Normal_Right', fontSize=10, alignment=TA_RIGHT))
+    styles.add(ParagraphStyle(name='Total', fontSize=14, fontName='Helvetica-Bold', alignment=TA_RIGHT, textColor=secondary_color))
+    
+    elements = []
+    
+    # Header section
+    header_data = [
+        [Paragraph(company_name, styles['CompanyName']), Paragraph('QUOTE', styles['QuoteTitle'])],
+    ]
+    
+    company_info = []
+    if branding.get("address"):
+        company_info.append(branding["address"])
+    if branding.get("phone"):
+        company_info.append(branding["phone"])
+    if branding.get("email"):
+        company_info.append(branding["email"])
+    
+    if company_info:
+        header_data.append([Paragraph('<br/>'.join(company_info), styles['Normal']), 
+                           Paragraph(f"<b>{quote.get('quote_number', '')}</b>", styles['Normal_Right'])])
+    else:
+        header_data.append(['', Paragraph(f"<b>{quote.get('quote_number', '')}</b>", styles['Normal_Right'])])
+    
+    header_table = Table(header_data, colWidths=[300, 200])
+    header_table.setStyle(TableStyle([
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+    ]))
+    elements.append(header_table)
+    elements.append(Spacer(1, 20))
+    
+    # Prepared For section
+    elements.append(Paragraph('PREPARED FOR', styles['SectionHeader']))
+    elements.append(Paragraph(quote.get('client_name', ''), styles['ClientName']))
+    elements.append(Paragraph(quote.get('client_email', ''), styles['Normal']))
+    if quote.get('client_address'):
+        elements.append(Paragraph(quote['client_address'], styles['Normal']))
+    elements.append(Spacer(1, 20))
+    
+    # Quote details
+    details_data = [
+        ['Date:', quote.get('created_at', '')[:10]],
+        ['Valid Until:', quote.get('valid_until', 'N/A') or 'N/A'],
+        ['Status:', quote.get('status', 'draft').upper()],
+    ]
+    details_table = Table(details_data, colWidths=[80, 150])
+    details_table.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('TEXTCOLOR', (0, 0), (0, -1), colors.grey),
+    ]))
+    elements.append(details_table)
+    elements.append(Spacer(1, 20))
+    
+    # Line items table
+    items_data = [['Description', 'Qty', 'Price', 'Total']]
+    for item in quote.get('items', []):
+        line_total = item.get('quantity', 1) * item.get('price', 0)
+        items_data.append([
+            item.get('description', ''),
+            str(item.get('quantity', 1)),
+            f"${item.get('price', 0):.2f}",
+            f"${line_total:.2f}"
+        ])
+    
+    items_table = Table(items_data, colWidths=[280, 60, 80, 80])
+    items_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), secondary_color),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('TOPPADDING', (0, 0), (-1, 0), 12),
+        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+        ('TOPPADDING', (0, 1), (-1, -1), 8),
+        ('LINEBELOW', (0, 0), (-1, -2), 0.5, colors.lightgrey),
+        ('LINEBELOW', (0, -1), (-1, -1), 1, colors.grey),
+    ]))
+    elements.append(items_table)
+    elements.append(Spacer(1, 20))
+    
+    # Totals
+    totals_data = [
+        ['Subtotal:', f"${quote.get('subtotal', 0):.2f}"],
+        ['Tax (10%):', f"${quote.get('tax', 0):.2f}"],
+        ['TOTAL:', f"${quote.get('total', 0):.2f}"],
+    ]
+    totals_table = Table(totals_data, colWidths=[400, 100])
+    totals_table.setStyle(TableStyle([
+        ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('TEXTCOLOR', (0, 0), (0, -1), colors.grey),
+        ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, -1), (-1, -1), 12),
+        ('TEXTCOLOR', (-1, -1), (-1, -1), secondary_color),
+        ('LINEABOVE', (0, -1), (-1, -1), 1, secondary_color),
+        ('TOPPADDING', (0, -1), (-1, -1), 8),
+    ]))
+    elements.append(totals_table)
+    
+    # Notes
+    if quote.get('notes'):
+        elements.append(Spacer(1, 30))
+        elements.append(Paragraph('NOTES', styles['SectionHeader']))
+        elements.append(Paragraph(quote['notes'], styles['Normal']))
+    
+    # Footer
+    elements.append(Spacer(1, 40))
+    elements.append(Paragraph(f'<para alignment="center"><font color="grey">Thank you for considering our services! • {company_name}</font></para>', styles['Normal']))
+    
+    doc.build(elements)
+    return buffer.getvalue()
         line_total = item.get("quantity", 1) * item.get("price", 0)
         items_html += f"""
         <tr>
