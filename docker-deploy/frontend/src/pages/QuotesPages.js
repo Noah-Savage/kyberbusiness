@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api, formatCurrency, formatDate, getStatusColor } from "../lib/utils";
+import { api, formatCurrency, formatDate, getStatusColor, API_URL } from "../lib/utils";
 import { useAuth } from "../context/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { Plus, Trash2, Edit, Eye, ArrowLeft, CalendarIcon, FileText, ArrowRightCircle, Loader2, Search } from "lucide-react";
+import { Plus, Trash2, Edit, Eye, ArrowLeft, CalendarIcon, FileText, ArrowRightCircle, Loader2, Search, FileDown, Send, Mail } from "lucide-react";
 
 function QuoteRow({ quote, canEdit, onView, onEdit }) {
   return (
