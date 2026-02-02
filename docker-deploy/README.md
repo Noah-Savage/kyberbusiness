@@ -1,4 +1,4 @@
-# KyberBusiness - Docker Deployment
+# KyberBusiness - Docker Deployment for Unraid
 
 A professional invoicing, quoting, and expense tracking application.
 
@@ -17,9 +17,10 @@ A professional invoicing, quoting, and expense tracking application.
    ```bash
    cp .env.example .env
    # Edit .env and add your generated keys
+   nano .env  # or use any text editor
    ```
 
-3. **Ensure data directory exists:**
+3. **Ensure data directories exist:**
    ```bash
    mkdir -p /mnt/user/appdata/kyberbusiness/data/mongodb
    mkdir -p /mnt/user/appdata/kyberbusiness/data/uploads
