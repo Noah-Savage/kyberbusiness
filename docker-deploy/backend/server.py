@@ -1607,10 +1607,14 @@ def generate_quote_pdf_html(quote: dict, branding: dict) -> str:
 
 def create_pdf(html_content: str) -> bytes:
     """Generate PDF from HTML content"""
-    html = HTML(string=html_content)
-    pdf_buffer = BytesIO()
-    html.write_pdf(pdf_buffer)
-    return pdf_buffer.getvalue()
+    try:
+        html = HTML(string=html_content)
+        pdf_buffer = BytesIO()
+        html.write_pdf(pdf_buffer)
+        return pdf_buffer.getvalue()
+    except Exception as e:
+        logger.error(f"PDF generation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
 
 async def send_email_with_attachment(
     to_email: str,
