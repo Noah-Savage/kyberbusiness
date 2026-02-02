@@ -280,10 +280,10 @@ async def require_accountant_or_admin(user: dict = Depends(get_current_user)):
 def generate_number(prefix: str) -> str:
     return f"{prefix}-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{secrets.token_hex(4).upper()}"
 
-def calculate_totals(items: List[Dict[str, Any]]) -> tuple:
+def calculate_totals(items: List[Dict[str, Any]], tax_rate: float = 10.0, shipping: float = 0.0) -> tuple:
     subtotal = sum(item.get("quantity", 1) * item.get("price", 0) for item in items)
-    tax = subtotal * 0.1  # 10% tax
-    total = subtotal + tax
+    tax = subtotal * (tax_rate / 100)
+    total = subtotal + tax + shipping
     return subtotal, tax, total
 
 async def send_email(to_email: str, subject: str, body_html: str):
