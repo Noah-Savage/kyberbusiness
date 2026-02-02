@@ -1,4 +1,4 @@
-FROM node:18-alpine as builder
+FROM node:18-alpine AS builder
 
 WORKDIR /app
 
@@ -10,6 +10,10 @@ RUN yarn install --frozen-lockfile
 
 # Copy source code
 COPY . .
+
+# Set environment variable for build - empty string means use relative URLs
+# nginx will proxy /api requests to the backend
+ENV REACT_APP_BACKEND_URL=""
 
 # Build the app
 RUN yarn build
