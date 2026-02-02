@@ -631,6 +631,10 @@ class KyberBusinessAPITester:
         self.test_reports_endpoints()
         self.test_settings_endpoints()
         
+        # Branding functionality
+        self.test_branding_endpoints()
+        self.test_branding_viewer_access()
+        
         # Print results
         print("\n" + "=" * 50)
         print(f"📊 Test Results: {self.tests_passed}/{self.tests_run} passed")
