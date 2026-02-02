@@ -17,34 +17,66 @@ import { toast } from "sonner";
 import { format } from "date-fns";
 import { Plus, Trash2, Edit, Eye, ArrowLeft, CalendarIcon, FileText, ArrowRightCircle, Loader2, Search } from "lucide-react";
 
-// Quotes List Page
-export const QuotesPage = () => {
+function QuoteRow({ quote, canEdit, onView, onEdit }) {
+  return (
+    <TableRow>
+      <TableCell className="font-mono text-sm">{quote.quote_number}</TableCell>
+      <TableCell className="font-medium">{quote.client_name}</TableCell>
+      <TableCell className="font-mono">{formatCurrency(quote.total)}</TableCell>
+      <TableCell><Badge className={getStatusColor(quote.status) + " capitalize"}>{quote.status}</Badge></TableCell>
+      <TableCell className="text-muted-foreground">{formatDate(quote.created_at)}</TableCell>
+      <TableCell className="text-right">
+        <Button variant="ghost" size="icon" onClick={onView} className="rounded-full"><Eye className="w-4 h-4" /></Button>
+        {canEdit && <Button variant="ghost" size="icon" onClick={onEdit} className="rounded-full"><Edit className="w-4 h-4" /></Button>}
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function ItemRow({ item, index, onUpdate, onRemove, canRemove }) {
+  return (
+    <div className="flex gap-3 items-start p-4 rounded-xl bg-accent/30">
+      <Input placeholder="Description" value={item.description} onChange={function(e) { onUpdate(index, "description", e.target.value); }} className="flex-1 rounded-xl" />
+      <Input type="number" placeholder="Qty" value={item.quantity} onChange={function(e) { onUpdate(index, "quantity", parseInt(e.target.value) || 0); }} className="w-20 rounded-xl" />
+      <Input type="number" placeholder="Price" value={item.price} onChange={function(e) { onUpdate(index, "price", parseFloat(e.target.value) || 0); }} className="w-28 rounded-xl" />
+      <div className="w-24 text-right font-mono pt-2">{formatCurrency(item.quantity * item.price)}</div>
+      <Button type="button" variant="ghost" size="icon" onClick={function() { onRemove(index); }} disabled={!canRemove} className="rounded-full text-destructive"><Trash2 className="w-4 h-4" /></Button>
+    </div>
+  );
+}
+
+function ViewItemRow({ item }) {
+  return (
+    <TableRow>
+      <TableCell>{item.description}</TableCell>
+      <TableCell className="text-right">{item.quantity}</TableCell>
+      <TableCell className="text-right font-mono">{formatCurrency(item.price)}</TableCell>
+      <TableCell className="text-right font-mono">{formatCurrency(item.quantity * item.price)}</TableCell>
+    </TableRow>
+  );
+}
+
+export function QuotesPage() {
   const navigate = useNavigate();
   const { canEdit } = useAuth();
   const [quotes, setQuotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
 
-  useEffect(() => {
-    const fetchQuotes = async () => {
-      try {
-        const data = await api.get("/quotes");
-        setQuotes(data);
-      } catch (err) {
-        toast.error("Failed to load quotes");
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchQuotes();
+  useEffect(function() {
+    api.get("/quotes").then(function(data) { setQuotes(data); }).catch(function() { toast.error("Failed to load quotes"); }).finally(function() { setLoading(false); });
   }, []);
 
-  const filtered = quotes.filter(
-    (q) => q.client_name.toLowerCase().includes(searchTerm.toLowerCase()) || q.quote_number.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filtered = quotes.filter(function(q) {
+    return q.client_name.toLowerCase().includes(searchTerm.toLowerCase()) || q.quote_number.toLowerCase().includes(searchTerm.toLowerCase());
+  });
 
-  if (loading) {
-    return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+  if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+
+  const rows = [];
+  for (let i = 0; i < filtered.length; i++) {
+    const q = filtered[i];
+    rows.push(<QuoteRow key={q.id} quote={q} canEdit={canEdit} onView={function() { navigate("/quotes/" + q.id); }} onEdit={function() { navigate("/quotes/" + q.id + "/edit"); }} />);
   }
 
   return (
@@ -54,54 +86,24 @@ export const QuotesPage = () => {
           <h1 className="text-3xl font-bold font-heading">Quotes</h1>
           <p className="text-muted-foreground mt-1">Manage your quotes and proposals</p>
         </div>
-        {canEdit && (
-          <Button onClick={() => navigate("/quotes/new")} className="rounded-full shadow-glow-cyan" data-testid="new-quote-btn">
-            <Plus className="w-4 h-4 mr-2" />New Quote
-          </Button>
-        )}
+        {canEdit && <Button onClick={function() { navigate("/quotes/new"); }} className="rounded-full shadow-glow-cyan" data-testid="new-quote-btn"><Plus className="w-4 h-4 mr-2" />New Quote</Button>}
       </div>
 
       <Card className="rounded-3xl bg-card/50 backdrop-blur-xl border-white/10">
         <CardHeader className="pb-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input placeholder="Search quotes..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10 rounded-xl" data-testid="search-quotes" />
+            <Input placeholder="Search quotes..." value={searchTerm} onChange={function(e) { setSearchTerm(e.target.value); }} className="pl-10 rounded-xl" data-testid="search-quotes" />
           </div>
         </CardHeader>
         <CardContent>
           {filtered.length === 0 ? (
-            <div className="text-center py-12">
-              <FileText className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-              <p className="text-muted-foreground">No quotes found</p>
-            </div>
+            <div className="text-center py-12"><FileText className="w-12 h-12 mx-auto text-muted-foreground mb-4" /><p className="text-muted-foreground">No quotes found</p></div>
           ) : (
             <div className="overflow-x-auto">
               <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Quote #</TableHead>
-                    <TableHead>Client</TableHead>
-                    <TableHead>Total</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filtered.map((quote) => (
-                    <TableRow key={quote.id}>
-                      <TableCell className="font-mono text-sm">{quote.quote_number}</TableCell>
-                      <TableCell className="font-medium">{quote.client_name}</TableCell>
-                      <TableCell className="font-mono">{formatCurrency(quote.total)}</TableCell>
-                      <TableCell><Badge className={getStatusColor(quote.status) + " capitalize"}>{quote.status}</Badge></TableCell>
-                      <TableCell className="text-muted-foreground">{formatDate(quote.created_at)}</TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="icon" onClick={() => navigate("/quotes/" + quote.id)} className="rounded-full"><Eye className="w-4 h-4" /></Button>
-                        {canEdit && <Button variant="ghost" size="icon" onClick={() => navigate("/quotes/" + quote.id + "/edit")} className="rounded-full"><Edit className="w-4 h-4" /></Button>}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
+                <TableHeader><TableRow><TableHead>Quote #</TableHead><TableHead>Client</TableHead><TableHead>Total</TableHead><TableHead>Status</TableHead><TableHead>Date</TableHead><TableHead className="text-right">Actions</TableHead></TableRow></TableHeader>
+                <TableBody>{rows}</TableBody>
               </Table>
             </div>
           )}
@@ -109,46 +111,51 @@ export const QuotesPage = () => {
       </Card>
     </div>
   );
-};
+}
 
-// Create Quote Page
-export const CreateQuotePage = () => {
+export function CreateQuotePage() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    client_name: "", client_email: "", client_address: "",
-    items: [{ description: "", quantity: 1, price: 0 }],
-    notes: "", valid_until: null, status: "draft"
-  });
+  const [clientName, setClientName] = useState("");
+  const [clientEmail, setClientEmail] = useState("");
+  const [clientAddress, setClientAddress] = useState("");
+  const [items, setItems] = useState([{ description: "", quantity: 1, price: 0 }]);
+  const [notes, setNotes] = useState("");
+  const [validUntil, setValidUntil] = useState(null);
+  const [status, setStatus] = useState("draft");
 
-  const addItem = () => setFormData({ ...formData, items: [...formData.items, { description: "", quantity: 1, price: 0 }] });
-  const removeItem = (idx) => formData.items.length > 1 && setFormData({ ...formData, items: formData.items.filter((_, i) => i !== idx) });
-  const updateItem = (idx, field, val) => {
-    const items = [...formData.items];
-    items[idx] = { ...items[idx], [field]: val };
-    setFormData({ ...formData, items });
-  };
+  function addItem() { setItems([...items, { description: "", quantity: 1, price: 0 }]); }
+  function removeItem(idx) { if (items.length > 1) setItems(items.filter(function(_, i) { return i !== idx; })); }
+  function updateItem(idx, field, val) {
+    const newItems = items.slice();
+    newItems[idx] = { ...newItems[idx], [field]: val };
+    setItems(newItems);
+  }
 
-  const subtotal = formData.items.reduce((s, i) => s + i.quantity * i.price, 0);
+  let subtotal = 0;
+  for (let i = 0; i < items.length; i++) { subtotal += items[i].quantity * items[i].price; }
   const tax = subtotal * 0.1;
   const total = subtotal + tax;
 
-  const handleSubmit = async (e) => {
+  function handleSubmit(e) {
     e.preventDefault();
-    if (!formData.client_name || !formData.client_email) { toast.error("Please fill client details"); return; }
+    if (!clientName || !clientEmail) { toast.error("Please fill client details"); return; }
     setLoading(true);
-    try {
-      await api.post("/quotes", formData);
-      toast.success("Quote created");
-      navigate("/quotes");
-    } catch (err) { toast.error(err.message); }
-    finally { setLoading(false); }
-  };
+    api.post("/quotes", { client_name: clientName, client_email: clientEmail, client_address: clientAddress, items: items, notes: notes, valid_until: validUntil, status: status })
+      .then(function() { toast.success("Quote created"); navigate("/quotes"); })
+      .catch(function(err) { toast.error(err.message); })
+      .finally(function() { setLoading(false); });
+  }
+
+  const itemRows = [];
+  for (let i = 0; i < items.length; i++) {
+    itemRows.push(<ItemRow key={i} item={items[i]} index={i} onUpdate={updateItem} onRemove={removeItem} canRemove={items.length > 1} />);
+  }
 
   return (
     <div className="space-y-6" data-testid="create-quote-page">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/quotes")} className="rounded-full"><ArrowLeft className="w-5 h-5" /></Button>
+        <Button variant="ghost" size="icon" onClick={function() { navigate("/quotes"); }} className="rounded-full"><ArrowLeft className="w-5 h-5" /></Button>
         <div><h1 className="text-3xl font-bold font-heading">New Quote</h1></div>
       </div>
 
@@ -157,39 +164,17 @@ export const CreateQuotePage = () => {
           <CardHeader><CardTitle>Client Information</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Client Name *</Label>
-                <Input value={formData.client_name} onChange={(e) => setFormData({ ...formData, client_name: e.target.value })} className="rounded-xl" data-testid="client-name" />
-              </div>
-              <div className="space-y-2">
-                <Label>Client Email *</Label>
-                <Input type="email" value={formData.client_email} onChange={(e) => setFormData({ ...formData, client_email: e.target.value })} className="rounded-xl" data-testid="client-email" />
-              </div>
+              <div className="space-y-2"><Label>Client Name *</Label><Input value={clientName} onChange={function(e) { setClientName(e.target.value); }} className="rounded-xl" data-testid="client-name" /></div>
+              <div className="space-y-2"><Label>Client Email *</Label><Input type="email" value={clientEmail} onChange={function(e) { setClientEmail(e.target.value); }} className="rounded-xl" data-testid="client-email" /></div>
             </div>
-            <div className="space-y-2">
-              <Label>Address</Label>
-              <Textarea value={formData.client_address} onChange={(e) => setFormData({ ...formData, client_address: e.target.value })} className="rounded-xl" />
-            </div>
+            <div className="space-y-2"><Label>Address</Label><Textarea value={clientAddress} onChange={function(e) { setClientAddress(e.target.value); }} className="rounded-xl" /></div>
           </CardContent>
         </Card>
 
         <Card className="rounded-3xl bg-card/50 backdrop-blur-xl border-white/10">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle>Line Items</CardTitle>
-            <Button type="button" variant="outline" size="sm" onClick={addItem} className="rounded-full"><Plus className="w-4 h-4 mr-1" /> Add</Button>
-          </CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between"><CardTitle>Line Items</CardTitle><Button type="button" variant="outline" size="sm" onClick={addItem} className="rounded-full"><Plus className="w-4 h-4 mr-1" /> Add</Button></CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {formData.items.map((item, idx) => (
-                <div key={idx} className="flex gap-3 items-start p-4 rounded-xl bg-accent/30">
-                  <Input placeholder="Description" value={item.description} onChange={(e) => updateItem(idx, "description", e.target.value)} className="flex-1 rounded-xl" />
-                  <Input type="number" placeholder="Qty" value={item.quantity} onChange={(e) => updateItem(idx, "quantity", parseInt(e.target.value) || 0)} className="w-20 rounded-xl" />
-                  <Input type="number" placeholder="Price" value={item.price} onChange={(e) => updateItem(idx, "price", parseFloat(e.target.value) || 0)} className="w-28 rounded-xl" />
-                  <div className="w-24 text-right font-mono pt-2">{formatCurrency(item.quantity * item.price)}</div>
-                  <Button type="button" variant="ghost" size="icon" onClick={() => removeItem(idx)} disabled={formData.items.length === 1} className="rounded-full text-destructive"><Trash2 className="w-4 h-4" /></Button>
-                </div>
-              ))}
-            </div>
+            <div className="space-y-4">{itemRows}</div>
             <div className="mt-6 pt-6 border-t space-y-2">
               <div className="flex justify-between text-sm"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">{formatCurrency(subtotal)}</span></div>
               <div className="flex justify-between text-sm"><span className="text-muted-foreground">Tax (10%)</span><span className="font-mono">{formatCurrency(tax)}</span></div>
@@ -205,94 +190,86 @@ export const CreateQuotePage = () => {
               <div className="space-y-2">
                 <Label>Valid Until</Label>
                 <Popover>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full justify-start rounded-xl">
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {formData.valid_until ? format(new Date(formData.valid_until), "PPP") : "Select date"}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0 rounded-xl">
-                    <Calendar mode="single" selected={formData.valid_until ? new Date(formData.valid_until) : undefined} onSelect={(d) => setFormData({ ...formData, valid_until: d?.toISOString().split("T")[0] })} />
-                  </PopoverContent>
+                  <PopoverTrigger asChild><Button variant="outline" className="w-full justify-start rounded-xl"><CalendarIcon className="mr-2 h-4 w-4" />{validUntil ? format(new Date(validUntil), "PPP") : "Select date"}</Button></PopoverTrigger>
+                  <PopoverContent className="w-auto p-0 rounded-xl"><Calendar mode="single" selected={validUntil ? new Date(validUntil) : undefined} onSelect={function(d) { setValidUntil(d ? d.toISOString().split("T")[0] : null); }} /></PopoverContent>
                 </Popover>
               </div>
               <div className="space-y-2">
                 <Label>Status</Label>
-                <Select value={formData.status} onValueChange={(v) => setFormData({ ...formData, status: v })}>
-                  <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
-                  <SelectContent className="rounded-xl">
-                    <SelectItem value="draft">Draft</SelectItem>
-                    <SelectItem value="sent">Sent</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Select value={status} onValueChange={setStatus}><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger><SelectContent className="rounded-xl"><SelectItem value="draft">Draft</SelectItem><SelectItem value="sent">Sent</SelectItem></SelectContent></Select>
               </div>
             </div>
-            <div className="space-y-2">
-              <Label>Notes</Label>
-              <Textarea value={formData.notes} onChange={(e) => setFormData({ ...formData, notes: e.target.value })} className="rounded-xl" />
-            </div>
+            <div className="space-y-2"><Label>Notes</Label><Textarea value={notes} onChange={function(e) { setNotes(e.target.value); }} className="rounded-xl" /></div>
           </CardContent>
         </Card>
 
-        <div className="flex justify-end">
-          <Button type="submit" disabled={loading} className="rounded-full shadow-glow-cyan" data-testid="save-quote">
-            {loading && <Loader2 className="w-4 h-4 animate-spin mr-2" />}Save Quote
-          </Button>
-        </div>
+        <div className="flex justify-end"><Button type="submit" disabled={loading} className="rounded-full shadow-glow-cyan" data-testid="save-quote">{loading && <Loader2 className="w-4 h-4 animate-spin mr-2" />}Save Quote</Button></div>
       </form>
     </div>
   );
-};
+}
 
-// Edit Quote Page
-export const EditQuotePage = () => {
+export function EditQuotePage() {
   const navigate = useNavigate();
   const { id } = useParams();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [formData, setFormData] = useState(null);
+  const [quote, setQuote] = useState(null);
+  const [clientName, setClientName] = useState("");
+  const [clientEmail, setClientEmail] = useState("");
+  const [clientAddress, setClientAddress] = useState("");
+  const [items, setItems] = useState([]);
+  const [notes, setNotes] = useState("");
+  const [validUntil, setValidUntil] = useState(null);
+  const [status, setStatus] = useState("draft");
 
-  useEffect(() => {
-    const fetch = async () => {
-      try {
-        const data = await api.get("/quotes/" + id);
-        setFormData(data);
-      } catch (err) { toast.error("Failed to load quote"); navigate("/quotes"); }
-      finally { setLoading(false); }
-    };
-    fetch();
+  useEffect(function() {
+    api.get("/quotes/" + id).then(function(data) {
+      setQuote(data);
+      setClientName(data.client_name);
+      setClientEmail(data.client_email);
+      setClientAddress(data.client_address || "");
+      setItems(data.items);
+      setNotes(data.notes || "");
+      setValidUntil(data.valid_until);
+      setStatus(data.status);
+    }).catch(function() { toast.error("Failed to load quote"); navigate("/quotes"); }).finally(function() { setLoading(false); });
   }, [id, navigate]);
 
-  if (loading || !formData) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+  function addItem() { setItems([...items, { description: "", quantity: 1, price: 0 }]); }
+  function removeItem(idx) { if (items.length > 1) setItems(items.filter(function(_, i) { return i !== idx; })); }
+  function updateItem(idx, field, val) {
+    const newItems = items.slice();
+    newItems[idx] = { ...newItems[idx], [field]: val };
+    setItems(newItems);
+  }
 
-  const addItem = () => setFormData({ ...formData, items: [...formData.items, { description: "", quantity: 1, price: 0 }] });
-  const removeItem = (idx) => formData.items.length > 1 && setFormData({ ...formData, items: formData.items.filter((_, i) => i !== idx) });
-  const updateItem = (idx, field, val) => {
-    const items = [...formData.items];
-    items[idx] = { ...items[idx], [field]: val };
-    setFormData({ ...formData, items });
-  };
-
-  const subtotal = formData.items.reduce((s, i) => s + i.quantity * i.price, 0);
+  let subtotal = 0;
+  for (let i = 0; i < items.length; i++) { subtotal += items[i].quantity * items[i].price; }
   const tax = subtotal * 0.1;
   const total = subtotal + tax;
 
-  const handleSubmit = async (e) => {
+  function handleSubmit(e) {
     e.preventDefault();
     setSaving(true);
-    try {
-      await api.put("/quotes/" + id, formData);
-      toast.success("Quote updated");
-      navigate("/quotes/" + id);
-    } catch (err) { toast.error(err.message); }
-    finally { setSaving(false); }
-  };
+    api.put("/quotes/" + id, { client_name: clientName, client_email: clientEmail, client_address: clientAddress, items: items, notes: notes, valid_until: validUntil, status: status })
+      .then(function() { toast.success("Quote updated"); navigate("/quotes/" + id); })
+      .catch(function(err) { toast.error(err.message); })
+      .finally(function() { setSaving(false); });
+  }
+
+  if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
+
+  const itemRows = [];
+  for (let i = 0; i < items.length; i++) {
+    itemRows.push(<ItemRow key={i} item={items[i]} index={i} onUpdate={updateItem} onRemove={removeItem} canRemove={items.length > 1} />);
+  }
 
   return (
     <div className="space-y-6" data-testid="edit-quote-page">
       <div className="flex items-center gap-4">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/quotes/" + id)} className="rounded-full"><ArrowLeft className="w-5 h-5" /></Button>
-        <div><h1 className="text-3xl font-bold font-heading">Edit Quote</h1><p className="text-muted-foreground">{formData.quote_number}</p></div>
+        <Button variant="ghost" size="icon" onClick={function() { navigate("/quotes/" + id); }} className="rounded-full"><ArrowLeft className="w-5 h-5" /></Button>
+        <div><h1 className="text-3xl font-bold font-heading">Edit Quote</h1>{quote && <p className="text-muted-foreground">{quote.quote_number}</p>}</div>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -300,27 +277,17 @@ export const EditQuotePage = () => {
           <CardHeader><CardTitle>Client Information</CardTitle></CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2"><Label>Client Name *</Label><Input value={formData.client_name} onChange={(e) => setFormData({ ...formData, client_name: e.target.value })} className="rounded-xl" /></div>
-              <div className="space-y-2"><Label>Client Email *</Label><Input type="email" value={formData.client_email} onChange={(e) => setFormData({ ...formData, client_email: e.target.value })} className="rounded-xl" /></div>
+              <div className="space-y-2"><Label>Client Name *</Label><Input value={clientName} onChange={function(e) { setClientName(e.target.value); }} className="rounded-xl" /></div>
+              <div className="space-y-2"><Label>Client Email *</Label><Input type="email" value={clientEmail} onChange={function(e) { setClientEmail(e.target.value); }} className="rounded-xl" /></div>
             </div>
-            <div className="space-y-2"><Label>Address</Label><Textarea value={formData.client_address} onChange={(e) => setFormData({ ...formData, client_address: e.target.value })} className="rounded-xl" /></div>
+            <div className="space-y-2"><Label>Address</Label><Textarea value={clientAddress} onChange={function(e) { setClientAddress(e.target.value); }} className="rounded-xl" /></div>
           </CardContent>
         </Card>
 
         <Card className="rounded-3xl bg-card/50 backdrop-blur-xl border-white/10">
           <CardHeader className="flex flex-row items-center justify-between"><CardTitle>Line Items</CardTitle><Button type="button" variant="outline" size="sm" onClick={addItem} className="rounded-full"><Plus className="w-4 h-4 mr-1" /> Add</Button></CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {formData.items.map((item, idx) => (
-                <div key={idx} className="flex gap-3 items-start p-4 rounded-xl bg-accent/30">
-                  <Input placeholder="Description" value={item.description} onChange={(e) => updateItem(idx, "description", e.target.value)} className="flex-1 rounded-xl" />
-                  <Input type="number" value={item.quantity} onChange={(e) => updateItem(idx, "quantity", parseInt(e.target.value) || 0)} className="w-20 rounded-xl" />
-                  <Input type="number" value={item.price} onChange={(e) => updateItem(idx, "price", parseFloat(e.target.value) || 0)} className="w-28 rounded-xl" />
-                  <div className="w-24 text-right font-mono pt-2">{formatCurrency(item.quantity * item.price)}</div>
-                  <Button type="button" variant="ghost" size="icon" onClick={() => removeItem(idx)} disabled={formData.items.length === 1} className="rounded-full text-destructive"><Trash2 className="w-4 h-4" /></Button>
-                </div>
-              ))}
-            </div>
+            <div className="space-y-4">{itemRows}</div>
             <div className="mt-6 pt-6 border-t space-y-2">
               <div className="flex justify-between text-sm"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">{formatCurrency(subtotal)}</span></div>
               <div className="flex justify-between text-sm"><span className="text-muted-foreground">Tax (10%)</span><span className="font-mono">{formatCurrency(tax)}</span></div>
@@ -333,10 +300,9 @@ export const EditQuotePage = () => {
       </form>
     </div>
   );
-};
+}
 
-// View Quote Page
-export const ViewQuotePage = () => {
+export function ViewQuotePage() {
   const navigate = useNavigate();
   const { id } = useParams();
   const { canEdit } = useAuth();
@@ -345,47 +311,39 @@ export const ViewQuotePage = () => {
   const [converting, setConverting] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  useEffect(() => {
-    const fetch = async () => {
-      try { setQuote(await api.get("/quotes/" + id)); }
-      catch (err) { toast.error("Failed to load quote"); navigate("/quotes"); }
-      finally { setLoading(false); }
-    };
-    fetch();
+  useEffect(function() {
+    api.get("/quotes/" + id).then(function(data) { setQuote(data); }).catch(function() { toast.error("Failed to load quote"); navigate("/quotes"); }).finally(function() { setLoading(false); });
   }, [id, navigate]);
 
-  const handleConvert = async () => {
+  function handleConvert() {
     setConverting(true);
-    try {
-      const inv = await api.post("/quotes/" + id + "/convert-to-invoice");
-      toast.success("Converted to invoice");
-      navigate("/invoices/" + inv.id);
-    } catch (err) { toast.error(err.message); }
-    finally { setConverting(false); }
-  };
+    api.post("/quotes/" + id + "/convert-to-invoice").then(function(inv) { toast.success("Converted to invoice"); navigate("/invoices/" + inv.id); }).catch(function(err) { toast.error(err.message); }).finally(function() { setConverting(false); });
+  }
 
-  const handleDelete = async () => {
-    try { await api.delete("/quotes/" + id); toast.success("Quote deleted"); navigate("/quotes"); }
-    catch (err) { toast.error(err.message); }
-  };
+  function handleDelete() {
+    api.delete("/quotes/" + id).then(function() { toast.success("Quote deleted"); navigate("/quotes"); }).catch(function(err) { toast.error(err.message); });
+  }
 
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
   if (!quote) return null;
+
+  const itemRows = [];
+  for (let i = 0; i < quote.items.length; i++) {
+    itemRows.push(<ViewItemRow key={i} item={quote.items[i]} />);
+  }
 
   return (
     <div className="space-y-6" data-testid="view-quote-page">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate("/quotes")} className="rounded-full"><ArrowLeft className="w-5 h-5" /></Button>
+          <Button variant="ghost" size="icon" onClick={function() { navigate("/quotes"); }} className="rounded-full"><ArrowLeft className="w-5 h-5" /></Button>
           <div><h1 className="text-3xl font-bold font-heading">{quote.quote_number}</h1><Badge className={getStatusColor(quote.status) + " capitalize mt-1"}>{quote.status}</Badge></div>
         </div>
         {canEdit && quote.status !== "converted" && (
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => navigate("/quotes/" + id + "/edit")} className="rounded-full"><Edit className="w-4 h-4 mr-2" /> Edit</Button>
-            <Button onClick={handleConvert} disabled={converting} className="rounded-full shadow-glow-magenta bg-secondary">
-              {converting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ArrowRightCircle className="w-4 h-4 mr-2" />}Convert to Invoice
-            </Button>
-            <Button variant="destructive" onClick={() => setDeleteOpen(true)} className="rounded-full"><Trash2 className="w-4 h-4" /></Button>
+            <Button variant="outline" onClick={function() { navigate("/quotes/" + id + "/edit"); }} className="rounded-full"><Edit className="w-4 h-4 mr-2" /> Edit</Button>
+            <Button onClick={handleConvert} disabled={converting} className="rounded-full shadow-glow-magenta bg-secondary">{converting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ArrowRightCircle className="w-4 h-4 mr-2" />}Convert to Invoice</Button>
+            <Button variant="destructive" onClick={function() { setDeleteOpen(true); }} className="rounded-full"><Trash2 className="w-4 h-4" /></Button>
           </div>
         )}
       </div>
@@ -396,11 +354,7 @@ export const ViewQuotePage = () => {
           <CardContent>
             <Table>
               <TableHeader><TableRow><TableHead>Description</TableHead><TableHead className="text-right">Qty</TableHead><TableHead className="text-right">Price</TableHead><TableHead className="text-right">Total</TableHead></TableRow></TableHeader>
-              <TableBody>
-                {quote.items.map((item, i) => (
-                  <TableRow key={i}><TableCell>{item.description}</TableCell><TableCell className="text-right">{item.quantity}</TableCell><TableCell className="text-right font-mono">{formatCurrency(item.price)}</TableCell><TableCell className="text-right font-mono">{formatCurrency(item.quantity * item.price)}</TableCell></TableRow>
-                ))}
-              </TableBody>
+              <TableBody>{itemRows}</TableBody>
             </Table>
             <div className="mt-6 pt-6 border-t space-y-2">
               <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">{formatCurrency(quote.subtotal)}</span></div>
@@ -428,8 +382,8 @@ export const ViewQuotePage = () => {
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="rounded-3xl"><DialogHeader><DialogTitle>Delete Quote</DialogTitle><DialogDescription>Are you sure? This cannot be undone.</DialogDescription></DialogHeader>
-        <DialogFooter><Button variant="outline" onClick={() => setDeleteOpen(false)} className="rounded-full">Cancel</Button><Button variant="destructive" onClick={handleDelete} className="rounded-full">Delete</Button></DialogFooter></DialogContent>
+        <DialogFooter><Button variant="outline" onClick={function() { setDeleteOpen(false); }} className="rounded-full">Cancel</Button><Button variant="destructive" onClick={handleDelete} className="rounded-full">Delete</Button></DialogFooter></DialogContent>
       </Dialog>
     </div>
   );
-};
+}
