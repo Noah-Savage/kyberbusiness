@@ -188,10 +188,10 @@ export function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Revenue This Month" value={formatCurrency(data?.revenue_this_month || 0)} icon={DollarSign} color="cyan" />
-        <StatCard title="Outstanding" value={formatCurrency(data?.total_outstanding || 0)} icon={Receipt} color="magenta" />
-        <StatCard title="Total Invoices" value={data?.invoice_count || 0} icon={FileText} color="cyan" />
-        <StatCard title="Total Expenses" value={data?.expense_count || 0} icon={Wallet} color="magenta" />
+        <StatCard title="Revenue This Month" value={formatCurrency(data?.revenue_this_month || 0)} icon={DollarSign} color="cyan" onClick={function() { navigate("/invoices?status=paid"); }} />
+        <StatCard title="Outstanding" value={formatCurrency(data?.total_outstanding || 0)} icon={Receipt} color="magenta" onClick={function() { navigate("/invoices?status=outstanding"); }} />
+        <StatCard title="Total Invoices" value={data?.invoice_count || 0} icon={FileText} color="cyan" onClick={function() { navigate("/invoices"); }} />
+        <StatCard title="Total Expenses" value={data?.expense_count || 0} icon={Wallet} color="magenta" onClick={function() { navigate("/expenses"); }} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
