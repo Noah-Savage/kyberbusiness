@@ -6,16 +6,13 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field, EmailStr, ConfigDict
+from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime, timezone, timedelta
 import jwt
 import bcrypt
 from cryptography.fernet import Fernet
-import aiosmtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 import base64
 import secrets
 import aiofiles
@@ -25,9 +22,10 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
-mongo_url = os.environ['MONGO_URL']
+mongo_url = os.environ.get('MONGO_URL', 'mongodb://mongo:27017')
+db_name = os.environ.get('DB_NAME', 'kyberbusiness')
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+db = client[db_name]
 
 # Upload directory
 UPLOAD_DIR = ROOT_DIR / "uploads"
@@ -39,7 +37,20 @@ JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24
 
 # Encryption key for storing sensitive credentials
-ENCRYPTION_KEY = os.environ.get('ENCRYPTION_KEY', Fernet.generate_key().decode())
+# Generate a valid key if not provided or invalid
+def get_encryption_key():
+    key = os.environ.get('ENCRYPTION_KEY', '')
+    if key:
+        try:
+            # Test if it's a valid Fernet key
+            Fernet(key.encode() if isinstance(key, str) else key)
+            return key
+        except Exception:
+            pass
+    # Generate a new key if none provided or invalid
+    return Fernet.generate_key().decode()
+
+ENCRYPTION_KEY = get_encryption_key()
 cipher_suite = Fernet(ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str) else ENCRYPTION_KEY)
 
 # Create the main app
@@ -187,7 +198,7 @@ class PayPalSettings(BaseModel):
 
 class EmailTemplateCreate(BaseModel):
     name: str
-    theme: str  # professional, modern, minimal, bold, classic
+    theme: str
     subject: str
     body_html: str
 
@@ -210,9 +221,8 @@ class EmailTemplateResponse(BaseModel):
     body_html: str
     is_default: bool
 
-class ReportRequest(BaseModel):
-    start_date: str
-    end_date: str
+class GeneralSettings(BaseModel):
+    require_email_verification: bool = False
 
 class RoleUpdate(BaseModel):
     role: str
@@ -272,39 +282,20 @@ def generate_number(prefix: str) -> str:
 
 def calculate_totals(items: List[Dict[str, Any]]) -> tuple:
     subtotal = sum(item.get("quantity", 1) * item.get("price", 0) for item in items)
-    tax = subtotal * 0.1  # 10% tax
+    tax = subtotal * 0.1
     total = subtotal + tax
     return subtotal, tax, total
 
-async def send_email(to_email: str, subject: str, body_html: str):
-    settings = await db.settings.find_one({"type": "smtp"}, {"_id": 0})
+async def get_general_settings():
+    settings = await db.settings.find_one({"type": "general"}, {"_id": 0})
     if not settings:
-        raise HTTPException(status_code=400, detail="SMTP not configured")
-    
-    try:
-        smtp_config = settings.get("data", {})
-        message = MIMEMultipart("alternative")
-        message["From"] = f"{smtp_config.get('from_name', 'KyberBusiness')} <{smtp_config.get('from_email')}>"
-        message["To"] = to_email
-        message["Subject"] = subject
-        message.attach(MIMEText(body_html, "html"))
-        
-        await aiosmtplib.send(
-            message,
-            hostname=smtp_config.get("host"),
-            port=smtp_config.get("port"),
-            username=smtp_config.get("username"),
-            password=decrypt_data(smtp_config.get("password")),
-            use_tls=smtp_config.get("use_tls", True)
-        )
-    except Exception as e:
-        logging.error(f"Failed to send email: {e}")
-        raise HTTPException(status_code=500, detail="Failed to send email")
+        return {"require_email_verification": False}
+    return settings.get("data", {"require_email_verification": False})
 
 # ==================== AUTH ROUTES ====================
 
 @api_router.post("/auth/register", response_model=TokenResponse)
-async def register(data: UserCreate, background_tasks: BackgroundTasks):
+async def register(data: UserCreate):
     existing = await db.users.find_one({"email": data.email})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -313,8 +304,12 @@ async def register(data: UserCreate, background_tasks: BackgroundTasks):
     is_admin = data.email.endswith("@thestarforge.org")
     role = UserRole.ADMIN if is_admin else UserRole.VIEWER
     
+    # Check if email verification is required
+    general_settings = await get_general_settings()
+    require_verification = general_settings.get("require_email_verification", False)
+    
     user_id = str(uuid.uuid4())
-    verification_token = secrets.token_urlsafe(32)
+    verification_token = secrets.token_urlsafe(32) if require_verification else None
     
     user_doc = {
         "id": user_id,
@@ -322,15 +317,12 @@ async def register(data: UserCreate, background_tasks: BackgroundTasks):
         "name": data.name,
         "password": hash_password(data.password),
         "role": role,
-        "email_verified": False,
+        "email_verified": not require_verification,  # Auto-verify if verification is disabled
         "verification_token": verification_token,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
     await db.users.insert_one(user_doc)
-    
-    # Queue verification email
-    # background_tasks.add_task(send_verification_email, data.email, verification_token)
     
     token = create_token(user_id, data.email, role)
     
@@ -341,7 +333,7 @@ async def register(data: UserCreate, background_tasks: BackgroundTasks):
             email=data.email,
             name=data.name,
             role=role,
-            email_verified=False,
+            email_verified=user_doc["email_verified"],
             created_at=user_doc["created_at"]
         )
     )
@@ -351,6 +343,13 @@ async def login(data: UserLogin):
     user = await db.users.find_one({"email": data.email}, {"_id": 0})
     if not user or not verify_password(data.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    # Check if email verification is required
+    general_settings = await get_general_settings()
+    require_verification = general_settings.get("require_email_verification", False)
+    
+    if require_verification and not user.get("email_verified", False):
+        raise HTTPException(status_code=403, detail="Email not verified. Please check your email for verification link.")
     
     token = create_token(user["id"], user["email"], user["role"])
     
@@ -380,7 +379,7 @@ async def verify_email(token: str = Query(...)):
     return {"message": "Email verified successfully"}
 
 @api_router.post("/auth/resend-verification")
-async def resend_verification(background_tasks: BackgroundTasks, user: dict = Depends(get_current_user)):
+async def resend_verification(user: dict = Depends(get_current_user)):
     if user.get("email_verified"):
         raise HTTPException(status_code=400, detail="Email already verified")
     
@@ -390,7 +389,6 @@ async def resend_verification(background_tasks: BackgroundTasks, user: dict = De
         {"$set": {"verification_token": verification_token}}
     )
     
-    # background_tasks.add_task(send_verification_email, user["email"], verification_token)
     return {"message": "Verification email sent"}
 
 @api_router.get("/auth/me", response_model=UserResponse)
@@ -624,7 +622,10 @@ async def get_public_invoice(invoice_id: str):
     paypal_settings = await db.settings.find_one({"type": "paypal"}, {"_id": 0})
     paypal_client_id = None
     if paypal_settings and paypal_settings.get("data", {}).get("client_id"):
-        paypal_client_id = decrypt_data(paypal_settings["data"]["client_id"])
+        try:
+            paypal_client_id = decrypt_data(paypal_settings["data"]["client_id"])
+        except Exception:
+            pass
     
     return {
         **invoice,
@@ -807,6 +808,24 @@ async def delete_vendor(vendor_id: str, user: dict = Depends(require_accountant_
 
 # ==================== SETTINGS ROUTES ====================
 
+@api_router.post("/settings/general")
+async def save_general_settings(data: GeneralSettings, user: dict = Depends(require_admin)):
+    settings_doc = {
+        "type": "general",
+        "data": {
+            "require_email_verification": data.require_email_verification
+        }
+    }
+    await db.settings.update_one({"type": "general"}, {"$set": settings_doc}, upsert=True)
+    return {"message": "General settings saved successfully"}
+
+@api_router.get("/settings/general")
+async def get_general_settings_endpoint(user: dict = Depends(require_admin)):
+    settings = await db.settings.find_one({"type": "general"}, {"_id": 0})
+    if not settings:
+        return {"require_email_verification": False}
+    return settings.get("data", {"require_email_verification": False})
+
 @api_router.post("/settings/smtp")
 async def save_smtp_settings(data: SMTPSettings, user: dict = Depends(require_admin)):
     encrypted_password = encrypt_data(data.password)
@@ -923,7 +942,7 @@ DEFAULT_TEMPLATES = [
     <p style="color: #333; margin-bottom: 30px;">Hi,</p>
     <p style="color: #666;">Your invoice <strong>#{invoice_number}</strong> for <strong>${total}</strong> is due on {due_date}.</p>
     <p style="margin: 30px 0;">
-        <a href="{payment_link}" style="color: #06b6d4; text-decoration: none; border-bottom: 2px solid #06b6d4; padding-bottom: 2px;">Pay now →</a>
+        <a href="{payment_link}" style="color: #06b6d4; text-decoration: none; border-bottom: 2px solid #06b6d4; padding-bottom: 2px;">Pay now</a>
     </p>
     <p style="color: #999; font-size: 14px;">Thanks,<br>KyberBusiness</p>
 </div>
@@ -934,7 +953,7 @@ DEFAULT_TEMPLATES = [
         "id": "default-bold",
         "name": "Bold Invoice",
         "theme": "bold",
-        "subject": "💎 INVOICE #{invoice_number} - Action Required",
+        "subject": "INVOICE #{invoice_number} - Action Required",
         "body_html": """
 <div style="font-family: 'Impact', sans-serif; max-width: 600px; margin: 0 auto; background: #0f172a; padding: 0;">
     <div style="background: #d946ef; padding: 20px; text-align: center;">
@@ -981,7 +1000,6 @@ DEFAULT_TEMPLATES = [
 async def list_email_templates(user: dict = Depends(get_current_user)):
     templates = await db.email_templates.find({}, {"_id": 0}).to_list(100)
     if not templates:
-        # Initialize with defaults
         for t in DEFAULT_TEMPLATES:
             await db.email_templates.insert_one(t)
         templates = DEFAULT_TEMPLATES
@@ -1091,7 +1109,6 @@ async def get_branding_settings(user: dict = Depends(get_current_user)):
 
 @api_router.get("/public/branding")
 async def get_public_branding():
-    """Public endpoint for branding (used on public invoice pages)"""
     settings = await db.settings.find_one({"type": "branding"}, {"_id": 0})
     if not settings:
         return {
@@ -1140,7 +1157,6 @@ async def upload_logo(file: UploadFile = File(...), user: dict = Depends(require
     
     logo_url = f"/api/uploads/{filename}"
     
-    # Update branding settings with logo URL
     await db.settings.update_one(
         {"type": "branding"},
         {"$set": {"data.logo_url": logo_url}},
@@ -1151,13 +1167,11 @@ async def upload_logo(file: UploadFile = File(...), user: dict = Depends(require
 
 @api_router.delete("/settings/branding/logo")
 async def delete_logo(user: dict = Depends(require_admin)):
-    # Remove logo URL from settings
     await db.settings.update_one(
         {"type": "branding"},
         {"$unset": {"data.logo_url": ""}}
     )
     
-    # Delete logo files
     import glob
     for f in glob.glob(str(UPLOAD_DIR / "company_logo.*")):
         try:
@@ -1175,7 +1189,6 @@ async def get_report_summary(
     end_date: str = Query(...),
     user: dict = Depends(get_current_user)
 ):
-    # Revenue from paid invoices
     invoices = await db.invoices.find({
         "status": "paid",
         "paid_at": {"$gte": start_date, "$lte": end_date}
@@ -1183,20 +1196,16 @@ async def get_report_summary(
     
     total_revenue = sum(inv.get("total", 0) for inv in invoices)
     
-    # Expenses
     expenses = await db.expenses.find({
         "date": {"$gte": start_date, "$lte": end_date}
     }, {"_id": 0}).to_list(10000)
     
     total_expenses = sum(exp.get("amount", 0) for exp in expenses)
-    
-    # Profit/Loss
     profit_loss = total_revenue - total_expenses
     
-    # Monthly breakdown for charts
     monthly_data = {}
     for inv in invoices:
-        month = inv.get("paid_at", "")[:7]  # YYYY-MM
+        month = inv.get("paid_at", "")[:7]
         if month not in monthly_data:
             monthly_data[month] = {"revenue": 0, "expenses": 0}
         monthly_data[month]["revenue"] += inv.get("total", 0)
@@ -1212,7 +1221,6 @@ async def get_report_summary(
         for k, v in sorted(monthly_data.items())
     ]
     
-    # Expense breakdown by category
     category_breakdown = {}
     for exp in expenses:
         cat = exp.get("category_name", "Uncategorized")
@@ -1234,28 +1242,23 @@ async def get_report_summary(
 
 @api_router.get("/reports/dashboard")
 async def get_dashboard_data(user: dict = Depends(get_current_user)):
-    # Get counts and recent items
     invoice_count = await db.invoices.count_documents({})
     quote_count = await db.quotes.count_documents({})
     expense_count = await db.expenses.count_documents({})
     
-    # Pending invoices
     pending_invoices = await db.invoices.find(
         {"status": {"$in": ["draft", "sent"]}}, 
         {"_id": 0}
     ).sort("created_at", -1).limit(5).to_list(5)
     
-    # Recent expenses
     recent_expenses = await db.expenses.find({}, {"_id": 0}).sort("date", -1).limit(5).to_list(5)
     
-    # Total outstanding
     outstanding_invoices = await db.invoices.find(
         {"status": {"$in": ["draft", "sent", "overdue"]}},
         {"_id": 0}
     ).to_list(1000)
     total_outstanding = sum(inv.get("total", 0) for inv in outstanding_invoices)
     
-    # This month's revenue
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1).isoformat()[:10]
     paid_this_month = await db.invoices.find({
@@ -1279,7 +1282,7 @@ async def get_dashboard_data(user: dict = Depends(get_current_user)):
 from fastapi.responses import FileResponse
 
 @api_router.get("/uploads/{filename}")
-async def serve_upload(filename: str, user: dict = Depends(get_current_user)):
+async def serve_upload(filename: str):
     filepath = UPLOAD_DIR / filename
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="File not found")
@@ -1297,7 +1300,7 @@ app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
