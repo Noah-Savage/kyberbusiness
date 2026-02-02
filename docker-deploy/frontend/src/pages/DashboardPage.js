@@ -236,13 +236,13 @@ export function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="rounded-3xl bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20">
+        <Card className="rounded-3xl bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20 cursor-pointer hover:scale-[1.02] transition-transform" onClick={function() { navigate("/invoices?status=paid"); }}>
           <CardContent className="p-6 text-center">
             <p className="text-sm text-muted-foreground">Total Revenue</p>
             <p className="text-4xl font-bold font-mono text-primary mt-2">{formatCurrency(reportData?.total_revenue || 0)}</p>
           </CardContent>
         </Card>
-        <Card className="rounded-3xl bg-gradient-to-br from-secondary/10 to-secondary/5 border-secondary/20">
+        <Card className="rounded-3xl bg-gradient-to-br from-secondary/10 to-secondary/5 border-secondary/20 cursor-pointer hover:scale-[1.02] transition-transform" onClick={function() { navigate("/expenses"); }}>
           <CardContent className="p-6 text-center">
             <p className="text-sm text-muted-foreground">Total Expenses</p>
             <p className="text-4xl font-bold font-mono text-secondary mt-2">{formatCurrency(reportData?.total_expenses || 0)}</p>
