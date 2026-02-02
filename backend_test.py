@@ -508,6 +508,101 @@ class KyberBusinessAPITester:
         
         return success, response
 
+    def test_branding_endpoints(self):
+        """Test branding settings endpoints"""
+        if not self.admin_token:
+            print("❌ No admin token available for branding testing")
+            return False, {}
+
+        headers = {'Authorization': f'Bearer {self.admin_token}'}
+        
+        # Test get branding settings (should work for any authenticated user)
+        success, response = self.run_test(
+            "Get Branding Settings",
+            "GET",
+            "settings/branding",
+            200,
+            headers=headers,
+            description="Should be able to get branding settings"
+        )
+        
+        # Test update branding settings (admin only)
+        branding_data = {
+            "company_name": "Test Company",
+            "primary_color": "#ff0000",
+            "secondary_color": "#00ff00", 
+            "accent_color": "#0000ff",
+            "tagline": "Test Tagline",
+            "address": "123 Test Street, Test City",
+            "phone": "+1-555-123-4567",
+            "email": "test@testcompany.com",
+            "website": "https://testcompany.com"
+        }
+        
+        success, response = self.run_test(
+            "Update Branding Settings",
+            "POST",
+            "settings/branding",
+            200,
+            data=branding_data,
+            headers=headers,
+            description="Admin should be able to update branding settings"
+        )
+        
+        # Test public branding endpoint (no auth required)
+        success, response = self.run_test(
+            "Get Public Branding",
+            "GET",
+            "public/branding",
+            200,
+            description="Public branding endpoint should work without authentication"
+        )
+        
+        if success:
+            # Verify the branding data was updated
+            if response.get('company_name') == 'Test Company':
+                print("✅ Branding data correctly updated and retrieved")
+            else:
+                print(f"❌ Branding data not updated correctly. Got: {response.get('company_name')}")
+        
+        return success, response
+
+    def test_branding_viewer_access(self):
+        """Test that viewer can read but not update branding settings"""
+        if not self.viewer_token:
+            print("❌ No viewer token available for branding access testing")
+            return False, {}
+
+        headers = {'Authorization': f'Bearer {self.viewer_token}'}
+        
+        # Viewer should be able to read branding settings
+        success, response = self.run_test(
+            "Viewer Get Branding Settings",
+            "GET",
+            "settings/branding",
+            200,
+            headers=headers,
+            description="Viewer should be able to read branding settings"
+        )
+        
+        # Viewer should NOT be able to update branding settings
+        branding_data = {
+            "company_name": "Unauthorized Update",
+            "primary_color": "#ff0000"
+        }
+        
+        self.run_test(
+            "Viewer Update Branding Settings",
+            "POST",
+            "settings/branding",
+            403,
+            data=branding_data,
+            headers=headers,
+            description="Viewer should be denied access to update branding settings"
+        )
+        
+        return success, response
+
     def run_all_tests(self):
         """Run all API tests"""
         print("🚀 Starting KyberBusiness API Tests")
