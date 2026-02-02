@@ -1288,6 +1288,492 @@ async def get_dashboard_data(user: dict = Depends(get_current_user)):
         "recent_expenses": recent_expenses
     }
 
+# ==================== PDF GENERATION ====================
+
+from weasyprint import HTML, CSS
+from io import BytesIO
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.application import MIMEApplication
+import aiosmtplib
+
+async def get_branding_data():
+    """Get branding settings for PDF generation"""
+    settings = await db.settings.find_one({"type": "branding"}, {"_id": 0})
+    if not settings:
+        return {
+            "company_name": "KyberBusiness",
+            "primary_color": "#06b6d4",
+            "secondary_color": "#d946ef",
+            "accent_color": "#10b981",
+            "tagline": "",
+            "address": "",
+            "phone": "",
+            "email": "",
+            "website": "",
+            "logo_url": None
+        }
+    return settings.get("data", {})
+
+def generate_invoice_pdf_html(invoice: dict, branding: dict) -> str:
+    """Generate HTML for invoice PDF"""
+    company_name = branding.get("company_name", "KyberBusiness")
+    primary_color = branding.get("primary_color", "#06b6d4")
+    secondary_color = branding.get("secondary_color", "#d946ef")
+    logo_url = branding.get("logo_url")
+    
+    # Build logo HTML
+    logo_html = ""
+    if logo_url:
+        logo_path = str(UPLOAD_DIR / logo_url.split("/")[-1])
+        logo_html = f'<img src="file://{logo_path}" style="max-height: 60px; max-width: 200px;" />'
+    
+    # Build items table
+    items_html = ""
+    for item in invoice.get("items", []):
+        line_total = item.get("quantity", 1) * item.get("price", 0)
+        items_html += f"""
+        <tr>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">{item.get("description", "")}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: center;">{item.get("quantity", 1)}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: right;">${item.get("price", 0):.2f}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: right;">${line_total:.2f}</td>
+        </tr>
+        """
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            @page {{ size: A4; margin: 1cm; }}
+            body {{ font-family: 'Helvetica', 'Arial', sans-serif; color: #1f2937; margin: 0; padding: 20px; }}
+            .header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; padding-bottom: 20px; border-bottom: 3px solid {primary_color}; }}
+            .company {{ }}
+            .company-name {{ font-size: 24px; font-weight: bold; color: {primary_color}; margin: 10px 0 5px; }}
+            .company-details {{ font-size: 11px; color: #6b7280; line-height: 1.5; }}
+            .invoice-title {{ text-align: right; }}
+            .invoice-title h1 {{ font-size: 36px; color: {primary_color}; margin: 0; letter-spacing: 2px; }}
+            .invoice-number {{ font-size: 14px; color: #6b7280; margin-top: 5px; }}
+            .invoice-status {{ display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; background: {primary_color}20; color: {primary_color}; margin-top: 10px; }}
+            .details-grid {{ display: flex; justify-content: space-between; margin-bottom: 30px; }}
+            .detail-box {{ background: #f9fafb; padding: 20px; border-radius: 8px; width: 48%; }}
+            .detail-box h3 {{ font-size: 12px; color: #6b7280; margin: 0 0 10px; text-transform: uppercase; letter-spacing: 1px; }}
+            .detail-box p {{ margin: 0; line-height: 1.6; }}
+            .detail-box .name {{ font-weight: bold; font-size: 16px; color: #1f2937; }}
+            table {{ width: 100%; border-collapse: collapse; margin-bottom: 30px; }}
+            th {{ background: {primary_color}; color: white; padding: 12px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }}
+            th:nth-child(2), th:nth-child(3), th:nth-child(4) {{ text-align: center; }}
+            th:last-child {{ text-align: right; }}
+            .totals {{ text-align: right; margin-top: 20px; }}
+            .totals-row {{ display: flex; justify-content: flex-end; padding: 8px 0; }}
+            .totals-label {{ width: 150px; color: #6b7280; }}
+            .totals-value {{ width: 120px; text-align: right; font-family: monospace; }}
+            .totals-total {{ font-size: 20px; font-weight: bold; color: {primary_color}; border-top: 2px solid {primary_color}; padding-top: 12px; margin-top: 8px; }}
+            .notes {{ background: #fef3c7; padding: 15px; border-radius: 8px; margin-top: 30px; border-left: 4px solid #f59e0b; }}
+            .notes h4 {{ margin: 0 0 8px; color: #92400e; font-size: 12px; text-transform: uppercase; }}
+            .notes p {{ margin: 0; font-size: 13px; color: #78350f; }}
+            .footer {{ text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #9ca3af; }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div class="company">
+                {logo_html}
+                <div class="company-name">{company_name}</div>
+                <div class="company-details">
+                    {branding.get("address", "") if branding.get("address") else ""}
+                    {"<br>" + branding.get("phone", "") if branding.get("phone") else ""}
+                    {"<br>" + branding.get("email", "") if branding.get("email") else ""}
+                    {"<br>" + branding.get("website", "") if branding.get("website") else ""}
+                </div>
+            </div>
+            <div class="invoice-title">
+                <h1>INVOICE</h1>
+                <div class="invoice-number">{invoice.get("invoice_number", "")}</div>
+                <div class="invoice-status">{invoice.get("status", "draft")}</div>
+            </div>
+        </div>
+        
+        <div class="details-grid">
+            <div class="detail-box">
+                <h3>Bill To</h3>
+                <p class="name">{invoice.get("client_name", "")}</p>
+                <p>{invoice.get("client_email", "")}</p>
+                <p>{invoice.get("client_address", "")}</p>
+            </div>
+            <div class="detail-box">
+                <h3>Invoice Details</h3>
+                <p><strong>Date:</strong> {invoice.get("created_at", "")[:10]}</p>
+                <p><strong>Due Date:</strong> {invoice.get("due_date", "N/A") or "N/A"}</p>
+            </div>
+        </div>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>Description</th>
+                    <th>Qty</th>
+                    <th>Price</th>
+                    <th>Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {items_html}
+            </tbody>
+        </table>
+        
+        <div class="totals">
+            <div class="totals-row">
+                <span class="totals-label">Subtotal:</span>
+                <span class="totals-value">${invoice.get("subtotal", 0):.2f}</span>
+            </div>
+            <div class="totals-row">
+                <span class="totals-label">Tax (10%):</span>
+                <span class="totals-value">${invoice.get("tax", 0):.2f}</span>
+            </div>
+            <div class="totals-row totals-total">
+                <span class="totals-label">Total:</span>
+                <span class="totals-value">${invoice.get("total", 0):.2f}</span>
+            </div>
+        </div>
+        
+        {"<div class='notes'><h4>Notes</h4><p>" + invoice.get("notes", "") + "</p></div>" if invoice.get("notes") else ""}
+        
+        <div class="footer">
+            Thank you for your business! • {company_name}
+        </div>
+    </body>
+    </html>
+    """
+    return html
+
+def generate_quote_pdf_html(quote: dict, branding: dict) -> str:
+    """Generate HTML for quote PDF"""
+    company_name = branding.get("company_name", "KyberBusiness")
+    primary_color = branding.get("primary_color", "#06b6d4")
+    secondary_color = branding.get("secondary_color", "#d946ef")
+    logo_url = branding.get("logo_url")
+    
+    # Build logo HTML
+    logo_html = ""
+    if logo_url:
+        logo_path = str(UPLOAD_DIR / logo_url.split("/")[-1])
+        logo_html = f'<img src="file://{logo_path}" style="max-height: 60px; max-width: 200px;" />'
+    
+    # Build items table
+    items_html = ""
+    for item in quote.get("items", []):
+        line_total = item.get("quantity", 1) * item.get("price", 0)
+        items_html += f"""
+        <tr>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">{item.get("description", "")}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: center;">{item.get("quantity", 1)}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: right;">${item.get("price", 0):.2f}</td>
+            <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: right;">${line_total:.2f}</td>
+        </tr>
+        """
+    
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            @page {{ size: A4; margin: 1cm; }}
+            body {{ font-family: 'Helvetica', 'Arial', sans-serif; color: #1f2937; margin: 0; padding: 20px; }}
+            .header {{ display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px; padding-bottom: 20px; border-bottom: 3px solid {secondary_color}; }}
+            .company {{ }}
+            .company-name {{ font-size: 24px; font-weight: bold; color: {primary_color}; margin: 10px 0 5px; }}
+            .company-details {{ font-size: 11px; color: #6b7280; line-height: 1.5; }}
+            .quote-title {{ text-align: right; }}
+            .quote-title h1 {{ font-size: 36px; color: {secondary_color}; margin: 0; letter-spacing: 2px; }}
+            .quote-number {{ font-size: 14px; color: #6b7280; margin-top: 5px; }}
+            .quote-status {{ display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; text-transform: uppercase; background: {secondary_color}20; color: {secondary_color}; margin-top: 10px; }}
+            .details-grid {{ display: flex; justify-content: space-between; margin-bottom: 30px; }}
+            .detail-box {{ background: #f9fafb; padding: 20px; border-radius: 8px; width: 48%; }}
+            .detail-box h3 {{ font-size: 12px; color: #6b7280; margin: 0 0 10px; text-transform: uppercase; letter-spacing: 1px; }}
+            .detail-box p {{ margin: 0; line-height: 1.6; }}
+            .detail-box .name {{ font-weight: bold; font-size: 16px; color: #1f2937; }}
+            table {{ width: 100%; border-collapse: collapse; margin-bottom: 30px; }}
+            th {{ background: {secondary_color}; color: white; padding: 12px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }}
+            th:nth-child(2), th:nth-child(3), th:nth-child(4) {{ text-align: center; }}
+            th:last-child {{ text-align: right; }}
+            .totals {{ text-align: right; margin-top: 20px; }}
+            .totals-row {{ display: flex; justify-content: flex-end; padding: 8px 0; }}
+            .totals-label {{ width: 150px; color: #6b7280; }}
+            .totals-value {{ width: 120px; text-align: right; font-family: monospace; }}
+            .totals-total {{ font-size: 20px; font-weight: bold; color: {secondary_color}; border-top: 2px solid {secondary_color}; padding-top: 12px; margin-top: 8px; }}
+            .validity {{ background: #dbeafe; padding: 15px; border-radius: 8px; margin-top: 30px; border-left: 4px solid #3b82f6; }}
+            .validity h4 {{ margin: 0 0 8px; color: #1e40af; font-size: 12px; text-transform: uppercase; }}
+            .validity p {{ margin: 0; font-size: 13px; color: #1e3a8a; }}
+            .notes {{ background: #fef3c7; padding: 15px; border-radius: 8px; margin-top: 15px; border-left: 4px solid #f59e0b; }}
+            .notes h4 {{ margin: 0 0 8px; color: #92400e; font-size: 12px; text-transform: uppercase; }}
+            .notes p {{ margin: 0; font-size: 13px; color: #78350f; }}
+            .footer {{ text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #9ca3af; }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <div class="company">
+                {logo_html}
+                <div class="company-name">{company_name}</div>
+                <div class="company-details">
+                    {branding.get("address", "") if branding.get("address") else ""}
+                    {"<br>" + branding.get("phone", "") if branding.get("phone") else ""}
+                    {"<br>" + branding.get("email", "") if branding.get("email") else ""}
+                    {"<br>" + branding.get("website", "") if branding.get("website") else ""}
+                </div>
+            </div>
+            <div class="quote-title">
+                <h1>QUOTE</h1>
+                <div class="quote-number">{quote.get("quote_number", "")}</div>
+                <div class="quote-status">{quote.get("status", "draft")}</div>
+            </div>
+        </div>
+        
+        <div class="details-grid">
+            <div class="detail-box">
+                <h3>Prepared For</h3>
+                <p class="name">{quote.get("client_name", "")}</p>
+                <p>{quote.get("client_email", "")}</p>
+                <p>{quote.get("client_address", "")}</p>
+            </div>
+            <div class="detail-box">
+                <h3>Quote Details</h3>
+                <p><strong>Date:</strong> {quote.get("created_at", "")[:10]}</p>
+                <p><strong>Valid Until:</strong> {quote.get("valid_until", "N/A") or "N/A"}</p>
+            </div>
+        </div>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>Description</th>
+                    <th>Qty</th>
+                    <th>Price</th>
+                    <th>Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {items_html}
+            </tbody>
+        </table>
+        
+        <div class="totals">
+            <div class="totals-row">
+                <span class="totals-label">Subtotal:</span>
+                <span class="totals-value">${quote.get("subtotal", 0):.2f}</span>
+            </div>
+            <div class="totals-row">
+                <span class="totals-label">Tax (10%):</span>
+                <span class="totals-value">${quote.get("tax", 0):.2f}</span>
+            </div>
+            <div class="totals-row totals-total">
+                <span class="totals-label">Total:</span>
+                <span class="totals-value">${quote.get("total", 0):.2f}</span>
+            </div>
+        </div>
+        
+        {"<div class='validity'><h4>Quote Validity</h4><p>This quote is valid until " + (quote.get("valid_until") or "further notice") + ". Please contact us to proceed.</p></div>" if quote.get("valid_until") else ""}
+        
+        {"<div class='notes'><h4>Notes</h4><p>" + quote.get("notes", "") + "</p></div>" if quote.get("notes") else ""}
+        
+        <div class="footer">
+            Thank you for considering our services! • {company_name}
+        </div>
+    </body>
+    </html>
+    """
+    return html
+
+def create_pdf(html_content: str) -> bytes:
+    """Generate PDF from HTML content"""
+    html = HTML(string=html_content)
+    pdf_buffer = BytesIO()
+    html.write_pdf(pdf_buffer)
+    return pdf_buffer.getvalue()
+
+async def send_email_with_attachment(
+    to_email: str,
+    subject: str,
+    body_html: str,
+    attachment_data: bytes,
+    attachment_filename: str
+):
+    """Send email with PDF attachment using configured SMTP"""
+    smtp_settings = await db.settings.find_one({"type": "smtp"}, {"_id": 0})
+    if not smtp_settings or not smtp_settings.get("data"):
+        raise HTTPException(status_code=400, detail="SMTP not configured. Please configure SMTP settings first.")
+    
+    smtp_data = smtp_settings["data"]
+    
+    # Create message
+    msg = MIMEMultipart()
+    msg["From"] = f"{smtp_data.get('from_name', 'KyberBusiness')} <{smtp_data.get('from_email')}>"
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    
+    # Attach HTML body
+    msg.attach(MIMEText(body_html, "html"))
+    
+    # Attach PDF
+    pdf_attachment = MIMEApplication(attachment_data, _subtype="pdf")
+    pdf_attachment.add_header("Content-Disposition", "attachment", filename=attachment_filename)
+    msg.attach(pdf_attachment)
+    
+    # Send email
+    try:
+        decrypted_password = decrypt_data(smtp_data["password"])
+        await aiosmtplib.send(
+            msg,
+            hostname=smtp_data["host"],
+            port=smtp_data["port"],
+            username=smtp_data["username"],
+            password=decrypted_password,
+            start_tls=smtp_data.get("use_tls", True)
+        )
+    except Exception as e:
+        logger.error(f"Failed to send email: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
+
+from fastapi.responses import Response
+
+@api_router.get("/invoices/{invoice_id}/pdf")
+async def download_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_user)):
+    """Download invoice as PDF"""
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    branding = await get_branding_data()
+    html_content = generate_invoice_pdf_html(invoice, branding)
+    pdf_data = create_pdf(html_content)
+    
+    return Response(
+        content=pdf_data,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={invoice['invoice_number']}.pdf"
+        }
+    )
+
+@api_router.get("/quotes/{quote_id}/pdf")
+async def download_quote_pdf(quote_id: str, user: dict = Depends(get_current_user)):
+    """Download quote as PDF"""
+    quote = await db.quotes.find_one({"id": quote_id}, {"_id": 0})
+    if not quote:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    
+    branding = await get_branding_data()
+    html_content = generate_quote_pdf_html(quote, branding)
+    pdf_data = create_pdf(html_content)
+    
+    return Response(
+        content=pdf_data,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={quote['quote_number']}.pdf"
+        }
+    )
+
+class EmailInvoiceRequest(BaseModel):
+    custom_message: Optional[str] = ""
+
+@api_router.post("/invoices/{invoice_id}/send-email")
+async def send_invoice_email(invoice_id: str, data: EmailInvoiceRequest, user: dict = Depends(require_accountant_or_admin)):
+    """Send invoice PDF via email to customer"""
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    branding = await get_branding_data()
+    company_name = branding.get("company_name", "KyberBusiness")
+    primary_color = branding.get("primary_color", "#06b6d4")
+    
+    # Generate PDF
+    html_content = generate_invoice_pdf_html(invoice, branding)
+    pdf_data = create_pdf(html_content)
+    
+    # Build email body
+    custom_msg = f"<p>{data.custom_message}</p>" if data.custom_message else ""
+    email_body = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: {primary_color};">Invoice from {company_name}</h2>
+        {custom_msg}
+        <p>Please find attached invoice <strong>{invoice['invoice_number']}</strong> for <strong>${invoice['total']:.2f}</strong>.</p>
+        <p>Due Date: {invoice.get('due_date', 'N/A') or 'N/A'}</p>
+        <p style="color: #666; font-size: 14px; margin-top: 30px;">
+            Thank you for your business!<br>
+            {company_name}
+        </p>
+    </div>
+    """
+    
+    await send_email_with_attachment(
+        to_email=invoice["client_email"],
+        subject=f"Invoice {invoice['invoice_number']} from {company_name}",
+        body_html=email_body,
+        attachment_data=pdf_data,
+        attachment_filename=f"{invoice['invoice_number']}.pdf"
+    )
+    
+    # Update invoice status to sent if it was draft
+    if invoice.get("status") == "draft":
+        await db.invoices.update_one({"id": invoice_id}, {"$set": {"status": "sent"}})
+    
+    return {"message": f"Invoice sent to {invoice['client_email']}"}
+
+class EmailQuoteRequest(BaseModel):
+    custom_message: Optional[str] = ""
+
+@api_router.post("/quotes/{quote_id}/send-email")
+async def send_quote_email(quote_id: str, data: EmailQuoteRequest, user: dict = Depends(require_accountant_or_admin)):
+    """Send quote PDF via email to customer"""
+    quote = await db.quotes.find_one({"id": quote_id}, {"_id": 0})
+    if not quote:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    
+    branding = await get_branding_data()
+    company_name = branding.get("company_name", "KyberBusiness")
+    primary_color = branding.get("primary_color", "#06b6d4")
+    secondary_color = branding.get("secondary_color", "#d946ef")
+    
+    # Generate PDF
+    html_content = generate_quote_pdf_html(quote, branding)
+    pdf_data = create_pdf(html_content)
+    
+    # Build email body
+    custom_msg = f"<p>{data.custom_message}</p>" if data.custom_message else ""
+    email_body = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h2 style="color: {secondary_color};">Quote from {company_name}</h2>
+        {custom_msg}
+        <p>Please find attached quote <strong>{quote['quote_number']}</strong> for <strong>${quote['total']:.2f}</strong>.</p>
+        <p>Valid Until: {quote.get('valid_until', 'N/A') or 'N/A'}</p>
+        <p>Please review and let us know if you'd like to proceed or if you have any questions.</p>
+        <p style="color: #666; font-size: 14px; margin-top: 30px;">
+            Thank you for considering our services!<br>
+            {company_name}
+        </p>
+    </div>
+    """
+    
+    await send_email_with_attachment(
+        to_email=quote["client_email"],
+        subject=f"Quote {quote['quote_number']} from {company_name}",
+        body_html=email_body,
+        attachment_data=pdf_data,
+        attachment_filename=f"{quote['quote_number']}.pdf"
+    )
+    
+    # Update quote status to sent if it was draft
+    if quote.get("status") == "draft":
+        await db.quotes.update_one({"id": quote_id}, {"$set": {"status": "sent"}})
+    
+    return {"message": f"Quote sent to {quote['client_email']}"}
+
 # ==================== FILE SERVING ====================
 
 from fastapi.responses import FileResponse
