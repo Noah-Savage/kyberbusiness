@@ -29,7 +29,9 @@ function BrandingSettings() {
     phone: "",
     email: "",
     website: "",
-    logo_url: null
+    logo_url: null,
+    default_tax_rate: 10.0,
+    terms_and_conditions: ""
   });
   const fileInputRef = useRef(null);
 
@@ -49,7 +51,9 @@ function BrandingSettings() {
         phone: data.phone || "",
         email: data.email || "",
         website: data.website || "",
-        logo_url: data.logo_url || null
+        logo_url: data.logo_url || null,
+        default_tax_rate: data.default_tax_rate || 10.0,
+        terms_and_conditions: data.terms_and_conditions || ""
       });
     }).catch(function(err) {
       console.error(err);
