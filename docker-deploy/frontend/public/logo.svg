@@ -1,0 +1,54 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="kyberGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#06b6d4" />
+      <stop offset="50%" stop-color="#22d3ee" />
+      <stop offset="100%" stop-color="#d946ef" />
+    </linearGradient>
+    <linearGradient id="kyberGradient2" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#d946ef" />
+      <stop offset="100%" stop-color="#06b6d4" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background circle for better visibility -->
+  <circle cx="256" cy="256" r="240" fill="#020617"/>
+  
+  <!-- Outer crystal facets -->
+  <polygon
+    points="256,36 410,164 410,348 256,476 102,348 102,164"
+    fill="none"
+    stroke="url(#kyberGradient)"
+    stroke-width="8"
+  />
+  
+  <!-- Inner crystal -->
+  <polygon
+    points="256,76 378,178 378,332 256,434 134,332 134,178"
+    fill="url(#kyberGradient)"
+    opacity="0.2"
+  />
+  
+  <!-- Central diamond -->
+  <polygon
+    points="256,128 332,256 256,384 180,256"
+    fill="url(#kyberGradient)"
+  />
+  
+  <!-- Crystal inner lines -->
+  <line x1="256" y1="76" x2="256" y2="128" stroke="url(#kyberGradient2)" stroke-width="6" />
+  <line x1="256" y1="384" x2="256" y2="434" stroke="url(#kyberGradient2)" stroke-width="6" />
+  <line x1="134" y1="178" x2="180" y2="256" stroke="url(#kyberGradient2)" stroke-width="6" />
+  <line x1="378" y1="178" x2="332" y2="256" stroke="url(#kyberGradient2)" stroke-width="6" />
+  <line x1="134" y1="332" x2="180" y2="256" stroke="url(#kyberGradient2)" stroke-width="6" />
+  <line x1="378" y1="332" x2="332" y2="256" stroke="url(#kyberGradient2)" stroke-width="6" />
+  
+  <!-- Dollar sign abstraction inside -->
+  <path
+    d="M256 180 L256 332 M230 205 Q256 180 282 205 Q256 256 230 281 Q256 332 282 307"
+    stroke="white"
+    stroke-width="10"
+    fill="none"
+    stroke-linecap="round"
+  />
+</svg>
