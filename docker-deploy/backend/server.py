@@ -900,8 +900,71 @@ async def get_smtp_settings(user: dict = Depends(require_admin)):
         "username": data.get("username"),
         "from_email": data.get("from_email"),
         "from_name": data.get("from_name"),
-        "use_tls": data.get("use_tls", True)
+        "use_tls": data.get("use_tls", True),
+        "password_set": bool(data.get("password"))  # Indicate if password is set without revealing it
     }
+
+class TestEmailRequest(BaseModel):
+    to_email: EmailStr
+
+@api_router.post("/settings/smtp/test")
+async def test_smtp_settings(data: TestEmailRequest, user: dict = Depends(require_admin)):
+    """Send a test email to verify SMTP configuration"""
+    settings = await db.settings.find_one({"type": "smtp"}, {"_id": 0})
+    if not settings:
+        raise HTTPException(status_code=400, detail="SMTP not configured. Please save SMTP settings first.")
+    
+    smtp_config = settings.get("data", {})
+    
+    # Validate required fields
+    if not smtp_config.get("host"):
+        raise HTTPException(status_code=400, detail="SMTP host is not configured")
+    if not smtp_config.get("port"):
+        raise HTTPException(status_code=400, detail="SMTP port is not configured")
+    if not smtp_config.get("password"):
+        raise HTTPException(status_code=400, detail="SMTP password is not configured")
+    if not smtp_config.get("from_email"):
+        raise HTTPException(status_code=400, detail="From email is not configured")
+    
+    try:
+        message = MIMEMultipart("alternative")
+        message["From"] = f"{smtp_config.get('from_name', 'KyberBusiness')} <{smtp_config.get('from_email')}>"
+        message["To"] = data.to_email
+        message["Subject"] = "KyberBusiness - SMTP Test Email"
+        
+        body_html = """
+        <div style="font-family: Arial, sans-serif; padding: 20px;">
+            <h2 style="color: #06b6d4;">SMTP Configuration Test</h2>
+            <p>This is a test email from KyberBusiness.</p>
+            <p>If you received this email, your SMTP settings are configured correctly!</p>
+            <hr style="border: 1px solid #eee; margin: 20px 0;">
+            <p style="color: #666; font-size: 12px;">Sent from KyberBusiness Invoice System</p>
+        </div>
+        """
+        message.attach(MIMEText(body_html, "html"))
+        
+        # Decrypt password
+        decrypted_password = decrypt_data(smtp_config.get("password"))
+        
+        await aiosmtplib.send(
+            message,
+            hostname=smtp_config.get("host"),
+            port=int(smtp_config.get("port")),
+            username=smtp_config.get("username"),
+            password=decrypted_password,
+            use_tls=smtp_config.get("use_tls", True)
+        )
+        
+        return {"message": f"Test email sent successfully to {data.to_email}"}
+    except aiosmtplib.SMTPAuthenticationError as e:
+        logging.error(f"SMTP authentication failed: {e}")
+        raise HTTPException(status_code=400, detail="SMTP authentication failed. Check your username and password.")
+    except aiosmtplib.SMTPConnectError as e:
+        logging.error(f"SMTP connection failed: {e}")
+        raise HTTPException(status_code=400, detail=f"Failed to connect to SMTP server. Check host and port. Error: {str(e)}")
+    except Exception as e:
+        logging.error(f"Failed to send test email: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send test email: {str(e)}")
 
 @api_router.post("/settings/paypal")
 async def save_paypal_settings(data: PayPalSettings, user: dict = Depends(require_admin)):
