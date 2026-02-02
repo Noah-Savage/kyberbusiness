@@ -46,10 +46,11 @@ A professional invoicing, quoting, and expense tracking application.
 ## Features
 
 - **Quotes & Invoices:** Create, edit, and track quotes/invoices
+- **Send Invoice Emails:** Email invoices directly to clients with payment links
 - **Expense Tracking:** Categories, vendors, receipt uploads (10MB max)
 - **Reports:** Revenue, expenses, and profit/loss dashboards
 - **Multi-user:** Admin, Accountant, and Viewer roles
-- **Branding:** Custom logo, colors, and company info
+- **Branding:** Custom logo, colors, and company info (logo displays on invoices and web UI)
 - **PayPal Integration:** Accept payments directly on invoices
 - **Email Templates:** 5 pre-built themes for invoice emails
 - **PWA Support:** Install as an app on mobile devices
