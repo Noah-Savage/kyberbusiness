@@ -641,6 +641,63 @@ async def mark_invoice_paid(invoice_id: str, payment_id: str = Query(...)):
         raise HTTPException(status_code=404, detail="Invoice not found")
     return {"message": "Invoice marked as paid"}
 
+class SendInvoiceRequest(BaseModel):
+    frontend_url: str  # The frontend URL for generating payment link
+
+@api_router.post("/invoices/{invoice_id}/send")
+async def send_invoice_email(invoice_id: str, data: SendInvoiceRequest, user: dict = Depends(require_accountant_or_admin)):
+    """Send invoice email to client with payment link"""
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    # Get branding settings
+    branding = await db.settings.find_one({"type": "branding"}, {"_id": 0})
+    company_name = branding.get("data", {}).get("company_name", "KyberBusiness") if branding else "KyberBusiness"
+    
+    # Get default email template
+    template = await db.email_templates.find_one({"is_default": True}, {"_id": 0})
+    if not template:
+        # Use first template or default
+        templates = await db.email_templates.find({}, {"_id": 0}).to_list(1)
+        template = templates[0] if templates else {
+            "subject": "Invoice #{invoice_number} from " + company_name,
+            "body_html": """
+<div style="font-family: Georgia, serif; max-width: 600px; margin: 0 auto; padding: 40px; background: #ffffff; border: 1px solid #e0e0e0;">
+    <h1 style="color: #333; border-bottom: 2px solid #06b6d4; padding-bottom: 10px;">INVOICE</h1>
+    <p style="color: #666;">Invoice Number: <strong>#{invoice_number}</strong></p>
+    <p style="color: #666;">Amount Due: <strong>${total}</strong></p>
+    <p style="color: #666;">Due Date: <strong>{due_date}</strong></p>
+    <div style="margin: 30px 0;">
+        <a href="{payment_link}" style="background: #06b6d4; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px;">Pay Now</a>
+    </div>
+    <p style="color: #999; font-size: 12px;">Thank you for your business.</p>
+</div>
+            """
+        }
+    
+    # Build payment link
+    payment_link = f"{data.frontend_url}/pay/{invoice_id}"
+    
+    # Format the email
+    subject = template["subject"].replace("{invoice_number}", invoice["invoice_number"])
+    body = template["body_html"]
+    body = body.replace("{invoice_number}", invoice["invoice_number"])
+    body = body.replace("#{invoice_number}", invoice["invoice_number"])
+    body = body.replace("{total}", f"{invoice['total']:.2f}")
+    body = body.replace("${total}", f"${invoice['total']:.2f}")
+    body = body.replace("{due_date}", invoice.get("due_date") or "Upon Receipt")
+    body = body.replace("{payment_link}", payment_link)
+    
+    # Send the email
+    await send_email(invoice["client_email"], subject, body)
+    
+    # Update invoice status to sent if it was draft
+    if invoice["status"] == "draft":
+        await db.invoices.update_one({"id": invoice_id}, {"$set": {"status": "sent"}})
+    
+    return {"message": "Invoice sent successfully", "payment_link": payment_link}
+
 # ==================== EXPENSES ROUTES ====================
 
 @api_router.post("/expenses", response_model=ExpenseResponse)
