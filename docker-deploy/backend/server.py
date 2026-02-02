@@ -1233,6 +1233,10 @@ async def delete_email_template(template_id: str, user: dict = Depends(require_a
 
 @api_router.post("/settings/branding")
 async def save_branding_settings(data: BrandingSettings, user: dict = Depends(require_admin)):
+    # Preserve existing logo_url
+    existing = await db.settings.find_one({"type": "branding"}, {"_id": 0})
+    existing_logo = existing.get("data", {}).get("logo_url") if existing else None
+    
     settings_doc = {
         "type": "branding",
         "data": {
@@ -1244,7 +1248,10 @@ async def save_branding_settings(data: BrandingSettings, user: dict = Depends(re
             "address": data.address or "",
             "phone": data.phone or "",
             "email": data.email or "",
-            "website": data.website or ""
+            "website": data.website or "",
+            "default_tax_rate": data.default_tax_rate if data.default_tax_rate is not None else 10.0,
+            "terms_and_conditions": data.terms_and_conditions or "",
+            "logo_url": existing_logo  # Preserve logo
         }
     }
     await db.settings.update_one({"type": "branding"}, {"$set": settings_doc}, upsert=True)
