@@ -61,11 +61,16 @@ function ViewItemRow(props) {
 
 export function InvoicesPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { canEdit } = useAuth();
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
+  
+  // Read status filter from URL params
+  const urlStatus = searchParams.get("status");
+  const initialFilter = urlStatus === "outstanding" ? "outstanding" : (urlStatus || "all");
+  const [statusFilter, setStatusFilter] = useState(initialFilter);
 
   useEffect(function() {
     api.get("/invoices").then(function(data) { setInvoices(data); }).catch(function() { toast.error("Failed to load invoices"); }).finally(function() { setLoading(false); });
@@ -73,7 +78,15 @@ export function InvoicesPage() {
 
   const filtered = invoices.filter(function(inv) {
     const matchesSearch = inv.client_name.toLowerCase().includes(searchTerm.toLowerCase()) || inv.invoice_number.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = statusFilter === "all" || inv.status === statusFilter;
+    let matchesStatus;
+    if (statusFilter === "all") {
+      matchesStatus = true;
+    } else if (statusFilter === "outstanding") {
+      // Outstanding means not paid (draft, sent, or overdue)
+      matchesStatus = inv.status !== "paid";
+    } else {
+      matchesStatus = inv.status === statusFilter;
+    }
     return matchesSearch && matchesStatus;
   });
 
@@ -106,6 +119,7 @@ export function InvoicesPage() {
               <SelectTrigger className="w-[150px] rounded-xl" data-testid="status-filter"><SelectValue placeholder="Status" /></SelectTrigger>
               <SelectContent className="rounded-xl">
                 <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="outstanding">Outstanding</SelectItem>
                 <SelectItem value="draft">Draft</SelectItem>
                 <SelectItem value="sent">Sent</SelectItem>
                 <SelectItem value="paid">Paid</SelectItem>
