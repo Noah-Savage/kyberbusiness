@@ -191,6 +191,17 @@ class EmailTemplateCreate(BaseModel):
     subject: str
     body_html: str
 
+class BrandingSettings(BaseModel):
+    company_name: str
+    primary_color: str = "#06b6d4"
+    secondary_color: str = "#d946ef"
+    accent_color: str = "#10b981"
+    tagline: Optional[str] = ""
+    address: Optional[str] = ""
+    phone: Optional[str] = ""
+    email: Optional[str] = ""
+    website: Optional[str] = ""
+
 class EmailTemplateResponse(BaseModel):
     id: str
     name: str
@@ -1023,6 +1034,138 @@ async def delete_email_template(template_id: str, user: dict = Depends(require_a
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Template not found")
     return {"message": "Template deleted successfully"}
+
+# ==================== BRANDING ROUTES ====================
+
+@api_router.post("/settings/branding")
+async def save_branding_settings(data: BrandingSettings, user: dict = Depends(require_admin)):
+    settings_doc = {
+        "type": "branding",
+        "data": {
+            "company_name": data.company_name,
+            "primary_color": data.primary_color,
+            "secondary_color": data.secondary_color,
+            "accent_color": data.accent_color,
+            "tagline": data.tagline or "",
+            "address": data.address or "",
+            "phone": data.phone or "",
+            "email": data.email or "",
+            "website": data.website or ""
+        }
+    }
+    await db.settings.update_one({"type": "branding"}, {"$set": settings_doc}, upsert=True)
+    return {"message": "Branding settings saved successfully"}
+
+@api_router.get("/settings/branding")
+async def get_branding_settings(user: dict = Depends(get_current_user)):
+    settings = await db.settings.find_one({"type": "branding"}, {"_id": 0})
+    if not settings:
+        return {
+            "configured": False,
+            "company_name": "KyberBusiness",
+            "primary_color": "#06b6d4",
+            "secondary_color": "#d946ef",
+            "accent_color": "#10b981",
+            "tagline": "",
+            "address": "",
+            "phone": "",
+            "email": "",
+            "website": "",
+            "logo_url": None
+        }
+    
+    data = settings.get("data", {})
+    return {
+        "configured": True,
+        "company_name": data.get("company_name", "KyberBusiness"),
+        "primary_color": data.get("primary_color", "#06b6d4"),
+        "secondary_color": data.get("secondary_color", "#d946ef"),
+        "accent_color": data.get("accent_color", "#10b981"),
+        "tagline": data.get("tagline", ""),
+        "address": data.get("address", ""),
+        "phone": data.get("phone", ""),
+        "email": data.get("email", ""),
+        "website": data.get("website", ""),
+        "logo_url": data.get("logo_url")
+    }
+
+@api_router.get("/public/branding")
+async def get_public_branding():
+    """Public endpoint for branding (used on public invoice pages)"""
+    settings = await db.settings.find_one({"type": "branding"}, {"_id": 0})
+    if not settings:
+        return {
+            "company_name": "KyberBusiness",
+            "primary_color": "#06b6d4",
+            "secondary_color": "#d946ef",
+            "accent_color": "#10b981",
+            "tagline": "",
+            "address": "",
+            "phone": "",
+            "email": "",
+            "website": "",
+            "logo_url": None
+        }
+    
+    data = settings.get("data", {})
+    return {
+        "company_name": data.get("company_name", "KyberBusiness"),
+        "primary_color": data.get("primary_color", "#06b6d4"),
+        "secondary_color": data.get("secondary_color", "#d946ef"),
+        "accent_color": data.get("accent_color", "#10b981"),
+        "tagline": data.get("tagline", ""),
+        "address": data.get("address", ""),
+        "phone": data.get("phone", ""),
+        "email": data.get("email", ""),
+        "website": data.get("website", ""),
+        "logo_url": data.get("logo_url")
+    }
+
+@api_router.post("/settings/branding/logo")
+async def upload_logo(file: UploadFile = File(...), user: dict = Depends(require_admin)):
+    contents = await file.read()
+    if len(contents) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Logo must be less than 5MB")
+    
+    allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="Invalid file type. Allowed: JPEG, PNG, GIF, WEBP, SVG")
+    
+    file_ext = file.filename.split(".")[-1] if "." in file.filename else "png"
+    filename = f"company_logo.{file_ext}"
+    filepath = UPLOAD_DIR / filename
+    
+    async with aiofiles.open(filepath, "wb") as f:
+        await f.write(contents)
+    
+    logo_url = f"/api/uploads/{filename}"
+    
+    # Update branding settings with logo URL
+    await db.settings.update_one(
+        {"type": "branding"},
+        {"$set": {"data.logo_url": logo_url}},
+        upsert=True
+    )
+    
+    return {"logo_url": logo_url}
+
+@api_router.delete("/settings/branding/logo")
+async def delete_logo(user: dict = Depends(require_admin)):
+    # Remove logo URL from settings
+    await db.settings.update_one(
+        {"type": "branding"},
+        {"$unset": {"data.logo_url": ""}}
+    )
+    
+    # Delete logo files
+    import glob
+    for f in glob.glob(str(UPLOAD_DIR / "company_logo.*")):
+        try:
+            os.remove(f)
+        except:
+            pass
+    
+    return {"message": "Logo deleted successfully"}
 
 # ==================== REPORTS ROUTES ====================
 
