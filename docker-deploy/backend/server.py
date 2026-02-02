@@ -986,13 +986,23 @@ async def test_smtp_settings(data: TestEmailRequest, user: dict = Depends(requir
         # Decrypt password
         decrypted_password = decrypt_data(smtp_config.get("password"))
         
+        port = int(smtp_config.get("port"))
+        # Port 465 uses direct TLS, port 587 uses STARTTLS
+        if port == 465:
+            use_tls = True
+            start_tls = False
+        else:
+            use_tls = False
+            start_tls = True
+        
         await aiosmtplib.send(
             message,
             hostname=smtp_config.get("host"),
-            port=int(smtp_config.get("port")),
+            port=port,
             username=smtp_config.get("username"),
             password=decrypted_password,
-            use_tls=smtp_config.get("use_tls", True)
+            use_tls=use_tls,
+            start_tls=start_tls
         )
         
         return {"message": f"Test email sent successfully to {data.to_email}"}
