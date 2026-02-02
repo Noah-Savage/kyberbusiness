@@ -603,6 +603,193 @@ class KyberBusinessAPITester:
         
         return success, response
 
+    def test_logo_upload_functionality(self):
+        """Test logo upload and retrieval functionality"""
+        if not self.admin_token:
+            print("❌ No admin token available for logo upload testing")
+            return False, {}
+
+        headers = {'Authorization': f'Bearer {self.admin_token}'}
+        
+        # Test logo upload endpoint exists (we'll test with a small dummy file)
+        # First, let's test the branding settings endpoint to see current logo
+        success, response = self.run_test(
+            "Get Branding Settings Before Logo Upload",
+            "GET",
+            "settings/branding",
+            200,
+            headers=headers,
+            description="Check current branding settings before logo upload"
+        )
+        
+        if success:
+            current_logo = response.get('logo_url')
+            print(f"   Current logo URL: {current_logo}")
+        
+        # Test public branding endpoint (used by public invoice pages)
+        success, response = self.run_test(
+            "Get Public Branding Settings",
+            "GET",
+            "public/branding",
+            200,
+            description="Public branding endpoint should work without authentication"
+        )
+        
+        if success:
+            public_logo = response.get('logo_url')
+            print(f"   Public logo URL: {public_logo}")
+            
+            # Check if logo URL is properly formatted for public access
+            if public_logo and public_logo.startswith('/public/uploads/'):
+                print("✅ Logo URL correctly formatted for public access")
+            elif public_logo:
+                print(f"❌ Logo URL not properly formatted for public access: {public_logo}")
+        
+        return success, response
+
+    def test_send_invoice_functionality(self):
+        """Test send invoice functionality"""
+        if not self.admin_token:
+            print("❌ No admin token available for send invoice testing")
+            return False, {}
+
+        headers = {'Authorization': f'Bearer {self.admin_token}'}
+        
+        # First create an invoice to send
+        invoice_data = {
+            "client_name": "Test Client for Email",
+            "client_email": "test-client@example.com",
+            "client_address": "123 Test St",
+            "items": [
+                {"description": "Test Service for Email", "quantity": 1, "price": 100.00}
+            ],
+            "notes": "Test invoice for email sending",
+            "status": "draft"
+        }
+        
+        success, response = self.run_test(
+            "Create Invoice for Send Test",
+            "POST",
+            "invoices",
+            200,
+            data=invoice_data,
+            headers=headers,
+            description="Create invoice to test send functionality"
+        )
+        
+        if not success or 'id' not in response:
+            print("❌ Cannot test send invoice without creating invoice first")
+            return False, {}
+        
+        invoice_id = response['id']
+        print(f"   Created invoice ID: {invoice_id}")
+        
+        # Test send invoice endpoint
+        send_data = {
+            "frontend_url": "https://invoice-payment-5.preview.emergentagent.com"
+        }
+        
+        success, response = self.run_test(
+            "Send Invoice Email",
+            "POST",
+            f"invoices/{invoice_id}/send",
+            200,
+            data=send_data,
+            headers=headers,
+            description="Should be able to send invoice email to client"
+        )
+        
+        if success:
+            payment_link = response.get('payment_link')
+            if payment_link:
+                print(f"✅ Payment link generated: {payment_link}")
+            else:
+                print("❌ No payment link returned in response")
+        
+        return success, response
+
+    def test_public_invoice_access(self):
+        """Test public invoice access functionality"""
+        if not self.admin_token:
+            print("❌ No admin token available for public invoice testing")
+            return False, {}
+
+        headers = {'Authorization': f'Bearer {self.admin_token}'}
+        
+        # Create an invoice for public access testing
+        invoice_data = {
+            "client_name": "Public Test Client",
+            "client_email": "public-test@example.com",
+            "items": [
+                {"description": "Public Test Service", "quantity": 1, "price": 50.00}
+            ],
+            "status": "sent"
+        }
+        
+        success, response = self.run_test(
+            "Create Invoice for Public Access Test",
+            "POST",
+            "invoices",
+            200,
+            data=invoice_data,
+            headers=headers,
+            description="Create invoice to test public access"
+        )
+        
+        if not success or 'id' not in response:
+            print("❌ Cannot test public invoice access without creating invoice first")
+            return False, {}
+        
+        invoice_id = response['id']
+        print(f"   Created public invoice ID: {invoice_id}")
+        
+        # Test public invoice access (no authentication required)
+        success, response = self.run_test(
+            "Access Public Invoice",
+            "GET",
+            f"public/invoices/{invoice_id}",
+            200,
+            description="Should be able to access invoice publicly without authentication"
+        )
+        
+        if success:
+            # Check if invoice data is properly returned
+            if response.get('invoice_number') and response.get('client_name'):
+                print("✅ Public invoice data correctly returned")
+            else:
+                print("❌ Public invoice data incomplete")
+                
+            # Check if PayPal client ID is included (if configured)
+            paypal_client_id = response.get('paypal_client_id')
+            if paypal_client_id:
+                print(f"✅ PayPal client ID included for payments: {paypal_client_id[:10]}...")
+            else:
+                print("ℹ️  No PayPal client ID (PayPal not configured)")
+        
+        return success, response
+
+    def test_public_logo_serving(self):
+        """Test public logo serving endpoint"""
+        # Test public logo endpoint (should only allow company logo files)
+        success, response = self.run_test(
+            "Access Public Logo Endpoint - Invalid File",
+            "GET",
+            "public/uploads/invalid_file.jpg",
+            403,
+            description="Should deny access to non-logo files"
+        )
+        
+        # Test with company logo filename (even if file doesn't exist, should get 404 not 403)
+        success, response = self.run_test(
+            "Access Public Logo Endpoint - Valid Logo Name",
+            "GET",
+            "public/uploads/company_logo.png",
+            404,  # File not found is expected if no logo uploaded
+            description="Should allow access to company logo files (404 if not exists)"
+        )
+        
+        return success, response
+
     def run_all_tests(self):
         """Run all API tests"""
         print("🚀 Starting KyberBusiness API Tests")
