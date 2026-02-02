@@ -1656,8 +1656,6 @@ async def send_email_with_attachment(
         raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
 
 from fastapi.responses import Response
-
-@api_router.get("/invoices/{invoice_id}/pdf")
 async def download_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_user)):
     """Download invoice as PDF"""
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
