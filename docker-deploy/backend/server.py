@@ -1137,9 +1137,12 @@ async def get_branding_settings(user: dict = Depends(get_current_user)):
     
     data = settings.get("data", {})
     logo_url = data.get("logo_url")
-    # Ensure logo URL uses public endpoint for img tag access
-    if logo_url and logo_url.startswith("/uploads/"):
-        logo_url = "/public" + logo_url
+    # Normalize logo URL to simple /uploads/ format
+    if logo_url:
+        # Remove any /api or /public prefix, keep just /uploads/filename
+        if "/uploads/" in logo_url:
+            filename = logo_url.split("/uploads/")[-1]
+            logo_url = f"/uploads/{filename}"
     
     return {
         "configured": True,
