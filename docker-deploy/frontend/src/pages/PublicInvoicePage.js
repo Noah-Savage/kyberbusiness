@@ -117,7 +117,7 @@ export function PublicInvoicePage() {
         <div className="flex items-center justify-center mb-8">
           <div className="flex items-center gap-3">
             {branding?.logo_url ? (
-              <img src={API_URL + branding.logo_url} alt={companyName} className="h-12 w-auto object-contain" />
+              <img src={branding.logo_url} alt={companyName} className="h-12 w-auto object-contain" />
             ) : (
               <KyberLogo size={48} />
             )}
