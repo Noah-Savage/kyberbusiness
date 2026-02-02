@@ -1657,8 +1657,11 @@ async def download_invoice_pdf(invoice_id: str, user: dict = Depends(get_current
         raise HTTPException(status_code=404, detail="Invoice not found")
     
     branding = await get_branding_data()
-    html_content = generate_invoice_pdf_html(invoice, branding)
-    pdf_data = create_pdf(html_content)
+    try:
+        pdf_data = create_invoice_pdf(invoice, branding)
+    except Exception as e:
+        logger.error(f"PDF generation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
     
     return Response(
         content=pdf_data,
@@ -1676,8 +1679,19 @@ async def download_quote_pdf(quote_id: str, user: dict = Depends(get_current_use
         raise HTTPException(status_code=404, detail="Quote not found")
     
     branding = await get_branding_data()
-    html_content = generate_quote_pdf_html(quote, branding)
-    pdf_data = create_pdf(html_content)
+    try:
+        pdf_data = create_quote_pdf(quote, branding)
+    except Exception as e:
+        logger.error(f"PDF generation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
+    
+    return Response(
+        content=pdf_data,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={quote['quote_number']}.pdf"
+        }
+    )
     
     return Response(
         content=pdf_data,
