@@ -1715,9 +1715,8 @@ async def send_invoice_email(invoice_id: str, data: EmailInvoiceRequest, user: d
     company_name = branding.get("company_name", "KyberBusiness")
     primary_color = branding.get("primary_color", "#06b6d4")
     
-    # Generate PDF
-    html_content = generate_invoice_pdf_html(invoice, branding)
-    pdf_data = create_pdf(html_content)
+    # Generate PDF using reportlab
+    pdf_data = create_invoice_pdf(invoice, branding)
     
     # Build email body
     custom_msg = f"<p>{data.custom_message}</p>" if data.custom_message else ""
