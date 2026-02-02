@@ -46,6 +46,18 @@ export const getStatusColor = (status) => {
 
 export const API_URL = process.env.REACT_APP_BACKEND_URL ? `${process.env.REACT_APP_BACKEND_URL}/api` : '/api';
 
+// Base URL without /api suffix for serving static files
+export const BASE_URL = process.env.REACT_APP_BACKEND_URL || '';
+
+// Helper to get full URL for uploaded files (logo, receipts etc)
+export const getUploadUrl = (path) => {
+  if (!path) return null;
+  // If path already starts with http, return as is
+  if (path.startsWith('http')) return path;
+  // Otherwise prepend the base URL
+  return `${BASE_URL}${path}`;
+};
+
 export const getAuthHeaders = () => {
   const token = localStorage.getItem("token");
   return token ? { Authorization: `Bearer ${token}` } : {};
