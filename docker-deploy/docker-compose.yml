@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: kyberbusiness-mongo
+    restart: unless-stopped
+    volumes:
+      - /mnt/user/appdata/kyberbusiness/data/mongodb:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=kyberbusiness
+    networks:
+      - kyberbusiness-network
+
+  backend:
+    build: ./backend
+    container_name: kyberbusiness-backend
+    restart: unless-stopped
+    depends_on:
+      - mongodb
+    environment:
+      - MONGO_URL=mongodb://mongodb:27017
+      - DB_NAME=kyberbusiness
+      - JWT_SECRET=${JWT_SECRET:-your-secure-jwt-secret-change-this}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-your-secure-encryption-key-32chars}
+      - CORS_ORIGINS=*
+    volumes:
+      - /mnt/user/appdata/kyberbusiness/data/uploads:/app/uploads
+    networks:
+      - kyberbusiness-network
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        - REACT_APP_BACKEND_URL=
+    container_name: kyberbusiness-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "11131:80"
+    networks:
+      - kyberbusiness-network
+
+networks:
+  kyberbusiness-network:
+    driver: bridge
