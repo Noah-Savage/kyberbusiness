@@ -327,6 +327,9 @@ export function ViewInvoicePage() {
   const [invoice, setInvoice] = useState(null);
   const [loading, setLoading] = useState(true);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [emailOpen, setEmailOpen] = useState(false);
+  const [customMessage, setCustomMessage] = useState("");
+  const [sending, setSending] = useState(false);
 
   useEffect(function() {
     api.get("/invoices/" + id).then(function(data) { setInvoice(data); }).catch(function() { toast.error("Failed to load invoice"); navigate("/invoices"); }).finally(function() { setLoading(false); });
@@ -340,6 +343,42 @@ export function ViewInvoicePage() {
     const url = window.location.origin + "/pay/" + id;
     navigator.clipboard.writeText(url);
     toast.success("Payment link copied!");
+  }
+
+  function downloadPDF() {
+    const token = localStorage.getItem("token");
+    fetch(API_URL + "/invoices/" + id + "/pdf", {
+      headers: { "Authorization": "Bearer " + token }
+    }).then(function(response) {
+      if (!response.ok) throw new Error("Failed to download PDF");
+      return response.blob();
+    }).then(function(blob) {
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = invoice.invoice_number + ".pdf";
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+      toast.success("PDF downloaded!");
+    }).catch(function(err) {
+      toast.error(err.message);
+    });
+  }
+
+  function sendEmail() {
+    setSending(true);
+    api.post("/invoices/" + id + "/send-email", { custom_message: customMessage })
+      .then(function() {
+        toast.success("Invoice sent to " + invoice.client_email);
+        setEmailOpen(false);
+        setCustomMessage("");
+        // Refresh invoice to update status
+        api.get("/invoices/" + id).then(function(data) { setInvoice(data); });
+      })
+      .catch(function(err) { toast.error(err.message); })
+      .finally(function() { setSending(false); });
   }
 
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
@@ -357,14 +396,17 @@ export function ViewInvoicePage() {
           <Button variant="ghost" size="icon" onClick={function() { navigate("/invoices"); }} className="rounded-full"><ArrowLeft className="w-5 h-5" /></Button>
           <div><h1 className="text-3xl font-bold font-heading">{invoice.invoice_number}</h1><Badge className={getStatusColor(invoice.status) + " capitalize mt-1"}>{invoice.status}</Badge></div>
         </div>
-        {canEdit && (
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={copyPaymentLink} className="rounded-full" data-testid="copy-payment-link"><Copy className="w-4 h-4 mr-2" /> Copy Payment Link</Button>
-            <Button variant="outline" onClick={function() { window.open("/pay/" + id, "_blank"); }} className="rounded-full" data-testid="open-payment-page"><ExternalLink className="w-4 h-4 mr-2" /> Payment Page</Button>
-            <Button variant="outline" onClick={function() { navigate("/invoices/" + id + "/edit"); }} className="rounded-full" data-testid="edit-invoice-btn"><Edit className="w-4 h-4 mr-2" /> Edit</Button>
-            <Button variant="destructive" onClick={function() { setDeleteOpen(true); }} className="rounded-full" data-testid="delete-invoice-btn"><Trash2 className="w-4 h-4" /></Button>
-          </div>
-        )}
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={downloadPDF} className="rounded-full" data-testid="download-pdf-btn"><FileDown className="w-4 h-4 mr-2" /> Download PDF</Button>
+          {canEdit && (
+            <>
+              <Button variant="outline" onClick={function() { setEmailOpen(true); }} className="rounded-full" data-testid="send-email-btn"><Send className="w-4 h-4 mr-2" /> Send Email</Button>
+              <Button variant="outline" onClick={copyPaymentLink} className="rounded-full" data-testid="copy-payment-link"><Copy className="w-4 h-4 mr-2" /> Copy Link</Button>
+              <Button variant="outline" onClick={function() { navigate("/invoices/" + id + "/edit"); }} className="rounded-full" data-testid="edit-invoice-btn"><Edit className="w-4 h-4 mr-2" /> Edit</Button>
+              <Button variant="destructive" onClick={function() { setDeleteOpen(true); }} className="rounded-full" data-testid="delete-invoice-btn"><Trash2 className="w-4 h-4" /></Button>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -412,6 +454,36 @@ export function ViewInvoicePage() {
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="rounded-3xl"><DialogHeader><DialogTitle>Delete Invoice</DialogTitle><DialogDescription>Are you sure? This cannot be undone.</DialogDescription></DialogHeader>
         <DialogFooter><Button variant="outline" onClick={function() { setDeleteOpen(false); }} className="rounded-full">Cancel</Button><Button variant="destructive" onClick={handleDelete} className="rounded-full">Delete</Button></DialogFooter></DialogContent>
+      </Dialog>
+
+      <Dialog open={emailOpen} onOpenChange={setEmailOpen}>
+        <DialogContent className="rounded-3xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Mail className="w-5 h-5 text-primary" /> Send Invoice</DialogTitle>
+            <DialogDescription>Send this invoice with PDF attachment to {invoice.client_email}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label>Custom Message (optional)</Label>
+              <Textarea value={customMessage} onChange={function(e) { setCustomMessage(e.target.value); }} placeholder="Add a personal message to the email..." className="rounded-xl" rows={4} />
+            </div>
+            <div className="p-4 rounded-xl bg-accent/30">
+              <p className="text-sm text-muted-foreground">The email will include:</p>
+              <ul className="text-sm mt-2 space-y-1">
+                <li>• Invoice details ({invoice.invoice_number})</li>
+                <li>• PDF attachment with your branding</li>
+                <li>• Amount due: {formatCurrency(invoice.total)}</li>
+              </ul>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={function() { setEmailOpen(false); }} className="rounded-full">Cancel</Button>
+            <Button onClick={sendEmail} disabled={sending} className="rounded-full shadow-glow-cyan">
+              {sending && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+              <Send className="w-4 h-4 mr-2" /> Send Invoice
+            </Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
     </div>
   );
