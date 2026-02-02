@@ -372,6 +372,9 @@ export function ViewInvoicePage() {
         </div>
         {canEdit && (
           <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={handleSendInvoice} disabled={sending || invoice.status === "paid"} className="rounded-full" data-testid="send-invoice-btn">
+              {sending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Mail className="w-4 h-4 mr-2" />} Send Invoice
+            </Button>
             <Button variant="outline" onClick={copyPaymentLink} className="rounded-full" data-testid="copy-payment-link"><Copy className="w-4 h-4 mr-2" /> Copy Payment Link</Button>
             <Button variant="outline" onClick={function() { window.open("/pay/" + id, "_blank"); }} className="rounded-full" data-testid="open-payment-page"><ExternalLink className="w-4 h-4 mr-2" /> Payment Page</Button>
             <Button variant="outline" onClick={function() { navigate("/invoices/" + id + "/edit"); }} className="rounded-full" data-testid="edit-invoice-btn"><Edit className="w-4 h-4 mr-2" /> Edit</Button>
