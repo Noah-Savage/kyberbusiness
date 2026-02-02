@@ -895,15 +895,19 @@ DEFAULT_TEMPLATES = [
         "id": "default-professional",
         "name": "Professional Invoice",
         "theme": "professional",
-        "subject": "Invoice #{invoice_number} from KyberBusiness",
+        "subject": "Invoice #{invoice_number} from {company_name}",
         "body_html": """
 <div style="font-family: Georgia, serif; max-width: 600px; margin: 0 auto; padding: 40px; background: #ffffff; border: 1px solid #e0e0e0;">
-    <h1 style="color: #333; border-bottom: 2px solid #06b6d4; padding-bottom: 10px;">INVOICE</h1>
+    <div style="text-align: center; margin-bottom: 30px;">
+        {logo_html}
+        <h2 style="color: #333; margin: 10px 0 0;">{company_name}</h2>
+    </div>
+    <h1 style="color: #333; border-bottom: 2px solid {primary_color}; padding-bottom: 10px;">INVOICE</h1>
     <p style="color: #666;">Invoice Number: <strong>#{invoice_number}</strong></p>
     <p style="color: #666;">Amount Due: <strong>${total}</strong></p>
     <p style="color: #666;">Due Date: <strong>{due_date}</strong></p>
     <div style="margin: 30px 0;">
-        <a href="{payment_link}" style="background: #06b6d4; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px;">Pay Now</a>
+        <a href="{payment_link}" style="background: {primary_color}; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px;">Pay Now</a>
     </div>
     <p style="color: #999; font-size: 12px;">Thank you for your business.</p>
 </div>
@@ -914,19 +918,21 @@ DEFAULT_TEMPLATES = [
         "id": "default-modern",
         "name": "Modern Invoice",
         "theme": "modern",
-        "subject": "Your Invoice #{invoice_number} is Ready",
+        "subject": "Your Invoice #{invoice_number} from {company_name} is Ready",
         "body_html": """
 <div style="font-family: 'Segoe UI', sans-serif; max-width: 600px; margin: 0 auto; padding: 0;">
-    <div style="background: linear-gradient(135deg, #06b6d4, #d946ef); padding: 30px; text-align: center;">
-        <h1 style="color: white; margin: 0;">Invoice Ready</h1>
+    <div style="background: linear-gradient(135deg, {primary_color}, {secondary_color}); padding: 30px; text-align: center;">
+        {logo_html}
+        <h1 style="color: white; margin: 10px 0 0;">{company_name}</h1>
+        <p style="color: rgba(255,255,255,0.8); margin: 5px 0;">Invoice Ready</p>
     </div>
     <div style="padding: 30px; background: #f8f9fa;">
         <p style="font-size: 18px; color: #333;">Invoice <strong>#{invoice_number}</strong></p>
         <div style="background: white; padding: 20px; border-radius: 10px; margin: 20px 0;">
-            <p style="margin: 0; font-size: 24px; color: #06b6d4;"><strong>${total}</strong></p>
+            <p style="margin: 0; font-size: 24px; color: {primary_color};"><strong>${total}</strong></p>
             <p style="margin: 5px 0 0; color: #666;">Due: {due_date}</p>
         </div>
-        <a href="{payment_link}" style="display: block; background: #d946ef; color: white; padding: 15px; text-decoration: none; border-radius: 25px; text-align: center;">Pay Invoice</a>
+        <a href="{payment_link}" style="display: block; background: {secondary_color}; color: white; padding: 15px; text-decoration: none; border-radius: 25px; text-align: center;">Pay Invoice</a>
     </div>
 </div>
         """,
@@ -936,15 +942,18 @@ DEFAULT_TEMPLATES = [
         "id": "default-minimal",
         "name": "Minimal Invoice",
         "theme": "minimal",
-        "subject": "Invoice #{invoice_number}",
+        "subject": "Invoice #{invoice_number} from {company_name}",
         "body_html": """
 <div style="font-family: -apple-system, sans-serif; max-width: 500px; margin: 0 auto; padding: 40px;">
+    <div style="margin-bottom: 30px;">
+        {logo_html}
+    </div>
     <p style="color: #333; margin-bottom: 30px;">Hi,</p>
     <p style="color: #666;">Your invoice <strong>#{invoice_number}</strong> for <strong>${total}</strong> is due on {due_date}.</p>
     <p style="margin: 30px 0;">
-        <a href="{payment_link}" style="color: #06b6d4; text-decoration: none; border-bottom: 2px solid #06b6d4; padding-bottom: 2px;">Pay now</a>
+        <a href="{payment_link}" style="color: {primary_color}; text-decoration: none; border-bottom: 2px solid {primary_color}; padding-bottom: 2px;">Pay now</a>
     </p>
-    <p style="color: #999; font-size: 14px;">Thanks,<br>KyberBusiness</p>
+    <p style="color: #999; font-size: 14px;">Thanks,<br>{company_name}</p>
 </div>
         """,
         "is_default": False
@@ -953,17 +962,18 @@ DEFAULT_TEMPLATES = [
         "id": "default-bold",
         "name": "Bold Invoice",
         "theme": "bold",
-        "subject": "INVOICE #{invoice_number} - Action Required",
+        "subject": "INVOICE #{invoice_number} from {company_name} - Action Required",
         "body_html": """
 <div style="font-family: 'Impact', sans-serif; max-width: 600px; margin: 0 auto; background: #0f172a; padding: 0;">
-    <div style="background: #d946ef; padding: 20px; text-align: center;">
-        <h1 style="color: white; margin: 0; font-size: 28px; letter-spacing: 3px;">INVOICE</h1>
+    <div style="background: {secondary_color}; padding: 20px; text-align: center;">
+        {logo_html}
+        <h1 style="color: white; margin: 10px 0 0; font-size: 28px; letter-spacing: 3px;">{company_name}</h1>
     </div>
     <div style="padding: 30px; text-align: center;">
-        <p style="color: #06b6d4; font-size: 48px; margin: 0;"><strong>${total}</strong></p>
+        <p style="color: {primary_color}; font-size: 48px; margin: 0;"><strong>${total}</strong></p>
         <p style="color: #94a3b8; font-size: 14px;">Invoice #{invoice_number}</p>
         <p style="color: #94a3b8;">Due: {due_date}</p>
-        <a href="{payment_link}" style="display: inline-block; margin-top: 20px; background: #06b6d4; color: #0f172a; padding: 20px 40px; text-decoration: none; font-weight: bold; font-size: 18px;">PAY NOW</a>
+        <a href="{payment_link}" style="display: inline-block; margin-top: 20px; background: {primary_color}; color: #0f172a; padding: 20px 40px; text-decoration: none; font-weight: bold; font-size: 18px;">PAY NOW</a>
     </div>
 </div>
         """,
@@ -973,11 +983,12 @@ DEFAULT_TEMPLATES = [
         "id": "default-classic",
         "name": "Classic Invoice",
         "theme": "classic",
-        "subject": "Invoice #{invoice_number} - Payment Request",
+        "subject": "Invoice #{invoice_number} from {company_name} - Payment Request",
         "body_html": """
 <div style="font-family: 'Times New Roman', serif; max-width: 600px; margin: 0 auto; padding: 40px; border: 3px double #333;">
     <div style="text-align: center; border-bottom: 1px solid #333; padding-bottom: 20px;">
-        <h1 style="color: #333; margin: 0; font-style: italic;">KyberBusiness</h1>
+        {logo_html}
+        <h1 style="color: #333; margin: 10px 0 0; font-style: italic;">{company_name}</h1>
         <p style="color: #666; margin: 5px 0;">Invoice</p>
     </div>
     <div style="padding: 30px 0;">
@@ -988,7 +999,7 @@ DEFAULT_TEMPLATES = [
         </table>
     </div>
     <div style="text-align: center; padding-top: 20px; border-top: 1px solid #333;">
-        <a href="{payment_link}" style="color: #06b6d4; text-decoration: none;">Click here to pay</a>
+        <a href="{payment_link}" style="color: {primary_color}; text-decoration: none;">Click here to pay</a>
     </div>
 </div>
         """,
