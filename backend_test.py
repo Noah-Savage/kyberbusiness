@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import uuid
 
 class KyberBusinessAPITester:
-    def __init__(self, base_url="https://kyber-finance.preview.emergentagent.com"):
+    def __init__(self, base_url="https://invoice-payment-5.preview.emergentagent.com"):
         self.base_url = base_url
         self.admin_token = None
         self.viewer_token = None
