@@ -1759,12 +1759,10 @@ async def send_quote_email(quote_id: str, data: EmailQuoteRequest, user: dict = 
     
     branding = await get_branding_data()
     company_name = branding.get("company_name", "KyberBusiness")
-    primary_color = branding.get("primary_color", "#06b6d4")
     secondary_color = branding.get("secondary_color", "#d946ef")
     
-    # Generate PDF
-    html_content = generate_quote_pdf_html(quote, branding)
-    pdf_data = create_pdf(html_content)
+    # Generate PDF using reportlab
+    pdf_data = create_quote_pdf(quote, branding)
     
     # Build email body
     custom_msg = f"<p>{data.custom_message}</p>" if data.custom_message else ""
@@ -1777,6 +1775,24 @@ async def send_quote_email(quote_id: str, data: EmailQuoteRequest, user: dict = 
         <p>Please review and let us know if you'd like to proceed or if you have any questions.</p>
         <p style="color: #666; font-size: 14px; margin-top: 30px;">
             Thank you for considering our services!<br>
+            {company_name}
+        </p>
+    </div>
+    """
+    
+    await send_email_with_attachment(
+        to_email=quote["client_email"],
+        subject=f"Quote {quote['quote_number']} from {company_name}",
+        body_html=email_body,
+        attachment_data=pdf_data,
+        attachment_filename=f"{quote['quote_number']}.pdf"
+    )
+    
+    # Update quote status to sent if it was draft
+    if quote.get("status") == "draft":
+        await db.quotes.update_one({"id": quote_id}, {"$set": {"status": "sent"}})
+    
+    return {"message": f"Quote sent to {quote['client_email']}"}
             {company_name}
         </p>
     </div>
