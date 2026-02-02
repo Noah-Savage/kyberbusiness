@@ -177,7 +177,8 @@ export function PublicInvoicePage() {
 
               <div className="border-t border-border pt-4 space-y-2">
                 <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">{formatCurrency(invoice.subtotal)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Tax (10%)</span><span className="font-mono">{formatCurrency(invoice.tax)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">Tax ({invoice.tax_rate || 10}%)</span><span className="font-mono">{formatCurrency(invoice.tax)}</span></div>
+                {invoice.shipping > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Shipping</span><span className="font-mono">{formatCurrency(invoice.shipping)}</span></div>}
                 <div className="flex justify-between text-xl font-bold pt-2 border-t border-border"><span>Total Due</span><span className="font-mono" style={{ color: primaryColor }}>{formatCurrency(invoice.total)}</span></div>
               </div>
 
@@ -185,6 +186,13 @@ export function PublicInvoicePage() {
                 <div className="flex items-center gap-2 mt-4 p-3 rounded-xl" style={{ backgroundColor: `${secondaryColor}15`, color: secondaryColor }}>
                   <Calendar className="w-4 h-4" />
                   <span className="text-sm">Due by {formatDate(invoice.due_date)}</span>
+                </div>
+              )}
+
+              {invoice.terms && (
+                <div className="mt-6 pt-4 border-t border-border">
+                  <h3 className="text-sm font-medium mb-2">Terms & Conditions</h3>
+                  <p className="text-xs text-muted-foreground whitespace-pre-wrap">{invoice.terms}</p>
                 </div>
               )}
             </CardContent>
