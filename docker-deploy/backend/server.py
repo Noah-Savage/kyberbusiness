@@ -303,13 +303,26 @@ async def send_email(to_email: str, subject: str, body_html: str):
         message["Subject"] = subject
         message.attach(MIMEText(body_html, "html"))
         
+        port = int(smtp_config.get("port", 587))
+        use_tls = smtp_config.get("use_tls", False)  # Direct TLS (port 465)
+        use_starttls = smtp_config.get("use_starttls", True)  # STARTTLS (port 587)
+        
+        # Port 465 typically uses direct TLS, port 587 uses STARTTLS
+        if port == 465:
+            use_tls = True
+            use_starttls = False
+        elif port == 587:
+            use_tls = False
+            use_starttls = True
+        
         await aiosmtplib.send(
             message,
             hostname=smtp_config.get("host"),
-            port=int(smtp_config.get("port", 587)),
+            port=port,
             username=smtp_config.get("username"),
             password=decrypt_data(smtp_config.get("password")),
-            use_tls=smtp_config.get("use_tls", True)
+            use_tls=use_tls,
+            start_tls=use_starttls
         )
     except aiosmtplib.SMTPAuthenticationError as e:
         logging.error(f"SMTP authentication failed: {e}")
