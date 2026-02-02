@@ -327,6 +327,7 @@ export function ViewInvoicePage() {
   const [invoice, setInvoice] = useState(null);
   const [loading, setLoading] = useState(true);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [sending, setSending] = useState(false);
 
   useEffect(function() {
     api.get("/invoices/" + id).then(function(data) { setInvoice(data); }).catch(function() { toast.error("Failed to load invoice"); navigate("/invoices"); }).finally(function() { setLoading(false); });
@@ -340,6 +341,18 @@ export function ViewInvoicePage() {
     const url = window.location.origin + "/pay/" + id;
     navigator.clipboard.writeText(url);
     toast.success("Payment link copied!");
+  }
+
+  function handleSendInvoice() {
+    setSending(true);
+    api.post("/invoices/" + id + "/send", { frontend_url: window.location.origin })
+      .then(function(data) { 
+        toast.success("Invoice sent to " + invoice.client_email); 
+        // Refresh invoice to get updated status
+        api.get("/invoices/" + id).then(function(data) { setInvoice(data); });
+      })
+      .catch(function(err) { toast.error(err.message || "Failed to send invoice"); })
+      .finally(function() { setSending(false); });
   }
 
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
