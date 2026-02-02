@@ -633,7 +633,9 @@ async def get_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
 
 @api_router.put("/invoices/{invoice_id}", response_model=InvoiceResponse)
 async def update_invoice(invoice_id: str, data: InvoiceCreate, user: dict = Depends(require_accountant_or_admin)):
-    subtotal, tax, total = calculate_totals(data.items)
+    tax_rate = data.tax_rate if data.tax_rate is not None else 10.0
+    shipping = data.shipping if data.shipping is not None else 0.0
+    subtotal, tax, total = calculate_totals(data.items, tax_rate, shipping)
     
     update_doc = {
         "client_name": data.client_name,
@@ -641,7 +643,9 @@ async def update_invoice(invoice_id: str, data: InvoiceCreate, user: dict = Depe
         "client_address": data.client_address or "",
         "items": data.items,
         "subtotal": subtotal,
+        "tax_rate": tax_rate,
         "tax": tax,
+        "shipping": shipping,
         "total": total,
         "notes": data.notes or "",
         "due_date": data.due_date,
