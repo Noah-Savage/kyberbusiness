@@ -1286,6 +1286,17 @@ async def serve_upload(filename: str, user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(filepath)
 
+@api_router.get("/public/uploads/{filename}")
+async def serve_public_upload(filename: str):
+    """Public endpoint for serving logos and other public assets"""
+    # Only allow company logo files to be served publicly
+    if not filename.startswith("company_logo"):
+        raise HTTPException(status_code=403, detail="Access denied")
+    filepath = UPLOAD_DIR / filename
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(filepath)
+
 # ==================== HEALTH CHECK ====================
 
 @api_router.get("/health")
