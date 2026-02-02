@@ -1138,7 +1138,8 @@ async def upload_logo(file: UploadFile = File(...), user: dict = Depends(require
     async with aiofiles.open(filepath, "wb") as f:
         await f.write(contents)
     
-    logo_url = f"/api/uploads/{filename}"
+    # Store URL without /api prefix since frontend adds it
+    logo_url = f"/uploads/{filename}"
     
     # Update branding settings with logo URL
     await db.settings.update_one(
