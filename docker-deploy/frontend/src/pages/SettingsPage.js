@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { api, API_URL, getAuthHeaders, getUploadUrl } from "../lib/utils";
+import { api, API_URL, getAuthHeaders } from "../lib/utils";
 import { useAuth } from "../context/AuthContext";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -132,7 +132,7 @@ function BrandingSettings() {
           <div className="flex items-center gap-6">
             <div className="w-32 h-32 rounded-2xl border-2 border-dashed border-border flex items-center justify-center bg-accent/20 overflow-hidden">
               {settings.logo_url ? (
-                <img src={getUploadUrl(settings.logo_url)} alt="Company Logo" className="w-full h-full object-contain" />
+                <img src={API_URL + settings.logo_url} alt="Company Logo" className="w-full h-full object-contain" />
               ) : (
                 <Image className="w-10 h-10 text-muted-foreground" />
               )}
