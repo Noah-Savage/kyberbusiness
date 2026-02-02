@@ -54,8 +54,10 @@ export const getUploadUrl = (path) => {
   if (!path) return null;
   // If path already starts with http, return as is
   if (path.startsWith('http')) return path;
-  // Otherwise prepend the base URL
-  return `${BASE_URL}${path}`;
+  // Remove /api prefix if present since BASE_URL doesn't include it
+  // but the ingress routes /api/* to the backend
+  const cleanPath = path.startsWith('/api/') ? path : `/api${path.startsWith('/') ? '' : '/'}${path}`;
+  return `${BASE_URL}${cleanPath}`;
 };
 
 export const getAuthHeaders = () => {
