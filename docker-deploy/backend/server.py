@@ -1178,9 +1178,10 @@ async def get_public_branding():
     
     data = settings.get("data", {})
     logo_url = data.get("logo_url")
-    # Convert authenticated URL to public URL for public access
-    if logo_url and logo_url.startswith("/uploads/"):
-        logo_url = "/public" + logo_url
+    # Normalize logo URL to simple /uploads/ format
+    if logo_url and "/uploads/" in logo_url:
+        filename = logo_url.split("/uploads/")[-1]
+        logo_url = f"/uploads/{filename}"
     
     return {
         "company_name": data.get("company_name", "KyberBusiness"),
