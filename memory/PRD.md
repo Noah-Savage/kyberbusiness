@@ -1,88 +1,68 @@
-# KyberBusiness - Product Requirements Document
+# KyberBusiness PRD
 
 ## Original Problem Statement
-Building KyberBusiness - an alternative to tools like InvoiceNinja for quoting, invoicing, and tracking expenses. Includes reports for revenue, expenses, etc with adjustable timeframes. Support for SMTP setup, customizable email templates (5 pre-built themes), PayPal integration for receiving payments. Expense tracker with categories, vendors, and receipt upload (10MB images). Material U theme with cyan/magenta coloring, crystal financial logo. Docker deployment on Unraid with PWA support.
+Clone the GitHub repo (https://github.com/Noah-Savage/kyberbusiness) and:
+1. Fix the issue with uploading logos - upload succeeds but logo doesn't display correctly in invoices or webUI
+2. Add ability to send invoice emails with payment link to clients
+3. Compile a zip folder for Unraid Docker deployment
+
+## Architecture
+- **Frontend**: React.js with Tailwind CSS
+- **Backend**: FastAPI (Python)
+- **Database**: MongoDB
+- **Deployment**: Docker Compose (3 containers: frontend, backend, mongodb)
 
 ## User Personas
-1. **Small Business Owner** - Creates invoices, tracks expenses, monitors profitability
-2. **Freelancer** - Generates quotes and invoices for clients
-3. **Accountant** - Manages financial records, categorizes expenses
-4. **Viewer** - Read-only access to financial data
+- **Admin**: Full access, configure settings (SMTP, PayPal, branding)
+- **Accountant**: Create/edit quotes, invoices, expenses
+- **Viewer**: Read-only access to data
 
 ## Core Requirements (Static)
-- [x] User authentication with JWT
-- [x] Email verification for new accounts
-- [x] Auto-admin for @thestarforge.org email domains
-- [x] Role-based access (Admin, Accountant, Viewer)
-- [x] Quote creation and management
-- [x] Invoice creation with PayPal payment integration
-- [x] Expense tracking with categories and vendors
-- [x] Receipt upload (10MB limit)
-- [x] SMTP configuration (encrypted storage)
-- [x] PayPal credentials (encrypted storage)
-- [x] 5 email templates (Professional, Modern, Minimal, Bold, Classic)
-- [x] Reports: Revenue, Expenses, Profit/Loss
-- [x] PWA manifest for Chrome Android
+- Invoice/Quote management with PDF generation
+- Expense tracking with receipt uploads
+- Multi-user role-based access
+- PayPal payment integration
+- Custom branding (logo, colors, company info)
+- Email templates for invoice delivery
 
-## What's Been Implemented
+## What's Been Implemented (Feb 2, 2026)
 
-### Jan 2026 - MVP Launch
-- Complete authentication system with JWT
-- Role-based access control (Admin/Accountant/Viewer)
-- Auto-admin detection for @thestarforge.org emails
-- Quote CRUD operations with convert-to-invoice feature
-- Invoice CRUD with public payment page
-- Expense tracking with categories and vendors
-- Receipt image upload (10MB limit)
-- Dashboard with Recharts (Revenue vs Expenses, Category breakdown)
-- Settings page with SMTP and PayPal configuration (encrypted)
-- 5 email templates pre-loaded
-- Admin panel for user management
-- Material U theme with cyan/magenta coloring
-- Responsive design for desktop and mobile
-- PWA manifest configured
+### Bug Fixes
+1. **Logo Display Fix**
+   - Root cause: Logo URL stored as `/api/uploads/{filename}`, but frontend used `API_URL + logo_url` creating double `/api/api/...` path
+   - Fix: Changed logo URL storage to `/uploads/{filename}` without `/api` prefix
+   - Added public endpoint `/api/public/uploads/{filename}` for unauthenticated access to logos on public invoice pages
 
-### Feb 2026 - Branding Feature
-- Company branding panel in Settings
-- Logo upload (5MB limit, PNG/JPG/SVG/GIF)
-- Company information (name, tagline, email, phone, address, website)
-- Customizable brand colors (primary, secondary, accent)
-- Public invoice page uses company branding
-- Color preview in settings
+2. **Send Invoice Feature**
+   - Added `POST /api/invoices/{invoice_id}/send` endpoint
+   - Sends email to client with payment link using configured email template
+   - Auto-updates invoice status from "draft" to "sent"
+   - Added "Send Invoice" button on invoice view page
 
-## Prioritized Backlog
+### Docker Deployment Package
+- Created `/app/kyberbusiness-docker-deploy.zip` with all files needed for `docker compose up`
+- Includes `.env.example`, README.md with setup instructions
+- Maintains original folder paths from docker-deploy directory
 
-### P0 - Critical
-- Email verification emails (requires SMTP configuration)
-- PayPal webhook verification for payments
+## Files Modified
+- `/app/backend/server.py` - Logo URL fixes, public uploads endpoint, send invoice API
+- `/app/frontend/src/pages/InvoicesPages.js` - Send Invoice button
+- `/app/docker-deploy/backend/server.py` - Synced with main backend
+- `/app/docker-deploy/frontend/src/pages/*.js` - Synced frontend files
 
-### P1 - Important  
-- Quote/Invoice PDF export
-- Email sending with templates
-- Receipt OCR for expense data extraction
-- Multi-currency support
+## Testing Status
+- Backend: 94.7% tests passed
+- Frontend: 90% tests passed
+- Logo upload and display: Working
+- Send Invoice: Working (requires SMTP configuration)
 
-### P2 - Nice to Have
-- Dashboard notifications
-- Recurring invoices
-- Client portal
-- Bank account integration
+## Backlog / Future Features
+- P1: Quote sending via email
+- P2: Invoice reminders for overdue payments
+- P2: Multi-currency support
+- P3: Client portal with invoice history
 
-## Technology Stack
-- **Frontend**: React 18, Tailwind CSS, Recharts, Shadcn/UI
-- **Backend**: FastAPI, MongoDB
-- **Auth**: JWT with bcrypt password hashing
-- **Encryption**: Fernet (cryptography library)
-- **Payments**: PayPal JS SDK (client-side)
-
-## Environment Variables Required
-- `MONGO_URL` - MongoDB connection string
-- `DB_NAME` - Database name
-- `JWT_SECRET` - Secret for JWT tokens
-- `ENCRYPTION_KEY` - Fernet key for credential encryption
-
-## Next Tasks
-1. Configure SMTP to enable email verification
-2. Add PayPal credentials to enable invoice payments
-3. Implement PDF export for invoices/quotes
-4. Add email sending functionality with templates
+## Next Action Items
+- Deploy to Unraid using the zip package
+- Configure SMTP settings for email functionality
+- Configure PayPal credentials for payment processing
