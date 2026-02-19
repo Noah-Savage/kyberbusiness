@@ -969,8 +969,8 @@ async def get_invoice_pdf(invoice_id: str, template: str = Query("professional")
     branding_doc = await db.settings.find_one({"type": "branding"}, {"_id": 0})
     branding = branding_doc.get("data", {}) if branding_doc else {}
     
-    # Generate PDF
-    pdf_buffer = generate_invoice_pdf(invoice, branding)
+    # Generate PDF with template
+    pdf_buffer = generate_invoice_pdf(invoice, branding, template=template)
     
     return StreamingResponse(
         pdf_buffer,
@@ -982,6 +982,7 @@ async def get_invoice_pdf(invoice_id: str, template: str = Query("professional")
 
 class SendInvoiceRequest(BaseModel):
     frontend_url: str  # The frontend URL for generating payment link
+    template: Optional[str] = "professional"
 
 @api_router.post("/invoices/{invoice_id}/send")
 async def send_invoice_email(invoice_id: str, data: SendInvoiceRequest, user: dict = Depends(require_accountant_or_admin)):
@@ -1005,8 +1006,9 @@ async def send_invoice_email(invoice_id: str, data: SendInvoiceRequest, user: di
     # Build payment link
     payment_link = f"{data.frontend_url}/pay/{invoice_id}"
     
-    # Generate PDF with payment link
-    pdf_buffer = generate_invoice_pdf(invoice, branding, payment_link)
+    # Generate PDF with payment link and template
+    template = data.template if data.template else "professional"
+    pdf_buffer = generate_invoice_pdf(invoice, branding, payment_link, template)
     
     # Create email
     message = MIMEMultipart("mixed")
