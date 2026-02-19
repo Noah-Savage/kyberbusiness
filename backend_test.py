@@ -790,6 +790,209 @@ class KyberBusinessAPITester:
         
         return success, response
 
+    def test_quote_pdf_download(self):
+        """Test quote PDF download functionality (Bug Fix #1)"""
+        if not self.admin_token:
+            print("❌ No admin token available for quote PDF testing")
+            return False, {}
+
+        headers = {'Authorization': f'Bearer {self.admin_token}'}
+        
+        # First create a quote to download PDF from
+        quote_data = {
+            "client_name": "PDF Test Client",
+            "client_email": "pdf-test@example.com",
+            "client_address": "123 PDF St",
+            "items": [
+                {"description": "PDF Test Service", "quantity": 1, "price": 150.00}
+            ],
+            "notes": "Test quote for PDF download",
+            "status": "draft"
+        }
+        
+        success, response = self.run_test(
+            "Create Quote for PDF Test",
+            "POST",
+            "quotes",
+            200,
+            data=quote_data,
+            headers=headers,
+            description="Create quote to test PDF download"
+        )
+        
+        if not success or 'id' not in response:
+            print("❌ Cannot test PDF download without creating quote first")
+            return False, {}
+        
+        quote_id = response['id']
+        print(f"   Created quote ID: {quote_id}")
+        
+        # Test PDF download endpoint - should return PDF file
+        url = f"{self.base_url}/api/quotes/{quote_id}/pdf"
+        try:
+            import requests
+            response = requests.get(url, headers=headers, timeout=30)
+            
+            self.tests_run += 1
+            print(f"\n🔍 Testing Quote PDF Download...")
+            print(f"   Description: Should return PDF file for quote {quote_id}")
+            
+            if response.status_code == 200:
+                # Check if response is actually a PDF
+                content_type = response.headers.get('content-type', '')
+                if 'application/pdf' in content_type:
+                    self.tests_passed += 1
+                    print(f"✅ Passed - Status: {response.status_code}, Content-Type: {content_type}")
+                    print(f"   PDF size: {len(response.content)} bytes")
+                    return True, {"content_length": len(response.content)}
+                else:
+                    print(f"❌ Failed - Expected PDF content-type, got {content_type}")
+                    self.failed_tests.append({
+                        "name": "Quote PDF Download",
+                        "expected": "application/pdf",
+                        "actual": content_type,
+                        "endpoint": f"quotes/{quote_id}/pdf"
+                    })
+                    return False, {}
+            else:
+                print(f"❌ Failed - Expected 200, got {response.status_code}")
+                try:
+                    error_detail = response.json()
+                    print(f"   Error: {error_detail}")
+                except:
+                    print(f"   Response: {response.text[:200]}")
+                self.failed_tests.append({
+                    "name": "Quote PDF Download",
+                    "expected": 200,
+                    "actual": response.status_code,
+                    "endpoint": f"quotes/{quote_id}/pdf"
+                })
+                return False, {}
+                
+        except Exception as e:
+            print(f"❌ Failed - Error: {str(e)}")
+            self.tests_run += 1
+            self.failed_tests.append({
+                "name": "Quote PDF Download",
+                "error": str(e),
+                "endpoint": f"quotes/{quote_id}/pdf"
+            })
+            return False, {}
+
+    def test_quote_send_email(self):
+        """Test quote send email functionality (Bug Fix #2)"""
+        if not self.admin_token:
+            print("❌ No admin token available for quote email testing")
+            return False, {}
+
+        headers = {'Authorization': f'Bearer {self.admin_token}'}
+        
+        # First create a quote to send email
+        quote_data = {
+            "client_name": "Email Test Client",
+            "client_email": "email-test@example.com",
+            "client_address": "123 Email St",
+            "items": [
+                {"description": "Email Test Service", "quantity": 1, "price": 200.00}
+            ],
+            "notes": "Test quote for email sending",
+            "status": "draft"
+        }
+        
+        success, response = self.run_test(
+            "Create Quote for Email Test",
+            "POST", 
+            "quotes",
+            200,
+            data=quote_data,
+            headers=headers,
+            description="Create quote to test email sending"
+        )
+        
+        if not success or 'id' not in response:
+            print("❌ Cannot test send email without creating quote first")
+            return False, {}
+        
+        quote_id = response['id']
+        print(f"   Created quote ID: {quote_id}")
+        
+        # Test send email endpoint - should return proper response
+        # (400 if SMTP not configured, 200 if configured)
+        send_data = {"frontend_url": self.base_url}
+        
+        success, response = self.run_test(
+            "Send Quote Email",
+            "POST",
+            f"quotes/{quote_id}/send-email",
+            [200, 400],  # Both are acceptable responses
+            data=send_data,
+            headers=headers,
+            description="Should return proper response (400 if SMTP not configured, 200 if configured)"
+        )
+        
+        return success, response
+
+    def run_test(self, name, method, endpoint, expected_status, data=None, headers=None, description=""):
+        """Run a single API test - updated to handle list of expected status codes"""
+        url = f"{self.base_url}/api/{endpoint}"
+        test_headers = {'Content-Type': 'application/json'}
+        if headers:
+            test_headers.update(headers)
+
+        self.tests_run += 1
+        print(f"\n🔍 Testing {name}...")
+        if description:
+            print(f"   Description: {description}")
+        
+        try:
+            if method == 'GET':
+                response = requests.get(url, headers=test_headers, timeout=30)
+            elif method == 'POST':
+                response = requests.post(url, json=data, headers=test_headers, timeout=30)
+            elif method == 'PUT':
+                response = requests.put(url, json=data, headers=test_headers, timeout=30)
+            elif method == 'DELETE':
+                response = requests.delete(url, headers=test_headers, timeout=30)
+
+            # Handle both single status code and list of status codes
+            if isinstance(expected_status, list):
+                success = response.status_code in expected_status
+                expected_display = f"one of {expected_status}"
+            else:
+                success = response.status_code == expected_status
+                expected_display = str(expected_status)
+
+            if success:
+                self.tests_passed += 1
+                print(f"✅ Passed - Status: {response.status_code}")
+                try:
+                    return True, response.json() if response.content else {}
+                except:
+                    return True, {}
+            else:
+                print(f"❌ Failed - Expected {expected_display}, got {response.status_code}")
+                try:
+                    error_detail = response.json()
+                    print(f"   Error: {error_detail}")
+                except:
+                    print(f"   Response: {response.text[:200]}")
+                self.failed_tests.append({
+                    "name": name,
+                    "expected": expected_display,
+                    "actual": response.status_code,
+                    "endpoint": endpoint
+                })
+                return False, {}
+
+        except Exception as e:
+            print(f"❌ Failed - Error: {str(e)}")
+            self.failed_tests.append({
+                "name": name,
+                "error": str(e),
+                "endpoint": endpoint
+            })
+            return False, {}
+
     def run_all_tests(self):
         """Run all API tests"""
         print("🚀 Starting KyberBusiness API Tests")
