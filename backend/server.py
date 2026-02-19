@@ -871,26 +871,32 @@ async def mark_invoice_paid(invoice_id: str, payment_id: str = Query(...)):
     return {"message": "Invoice marked as paid"}
 
 # Helper function to generate PDF for invoices
-def generate_invoice_pdf(invoice: dict, branding: dict = None, payment_link: str = None) -> BytesIO:
-    """Generate a PDF for an invoice"""
+def generate_invoice_pdf(invoice: dict, branding: dict = None, payment_link: str = None, template: str = "professional") -> BytesIO:
+    """Generate a PDF for an invoice with template support"""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=72)
+    
+    # Get template settings
+    tmpl = PDF_TEMPLATES.get(template, PDF_TEMPLATES["professional"])
+    primary_color = colors.HexColor(branding.get("primary_color", tmpl["primary_color"])) if branding else colors.HexColor(tmpl["primary_color"])
+    header_bg = colors.HexColor(tmpl["header_bg"])
+    text_color = colors.white if template != "minimal" else colors.HexColor("#1f2937")
     
     elements = []
     styles = getSampleStyleSheet()
     
     # Company name / title
     company_name = branding.get("company_name", "KyberBusiness") if branding else "KyberBusiness"
-    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=24, spaceAfter=20, textColor=colors.HexColor('#06b6d4'))
+    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=24, spaceAfter=20, textColor=primary_color, fontName=tmpl["font"])
     elements.append(Paragraph(company_name, title_style))
     
     # Invoice header
-    header_style = ParagraphStyle('Header', parent=styles['Heading2'], fontSize=18, spaceAfter=12)
+    header_style = ParagraphStyle('Header', parent=styles['Heading2'], fontSize=18, spaceAfter=12, fontName=tmpl["font"])
     elements.append(Paragraph(f"INVOICE: {invoice['invoice_number']}", header_style))
     elements.append(Spacer(1, 12))
     
     # Client info
-    normal_style = styles['Normal']
+    normal_style = ParagraphStyle('Normal', parent=styles['Normal'], fontName=tmpl["font"])
     elements.append(Paragraph(f"<b>Bill To:</b> {invoice['client_name']}", normal_style))
     elements.append(Paragraph(f"<b>Email:</b> {invoice['client_email']}", normal_style))
     if invoice.get('client_address'):
