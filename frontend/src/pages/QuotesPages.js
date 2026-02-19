@@ -395,7 +395,10 @@ export function ViewQuotePage() {
           <div><h1 className="text-3xl font-bold font-heading">{quote.quote_number}</h1><Badge className={getStatusColor(quote.status) + " capitalize mt-1"}>{quote.status}</Badge></div>
         </div>
         {canEdit && quote.status !== "converted" && (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <select value={selectedTemplate} onChange={function(e) { setSelectedTemplate(e.target.value); }} className="h-9 px-3 rounded-full border border-input bg-background text-sm" data-testid="template-selector">
+              {templates.map(function(t) { return <option key={t.id} value={t.id}>{t.name}</option>; })}
+            </select>
             <Button variant="outline" onClick={handlePreviewPDF} className="rounded-full" data-testid="preview-quote-btn"><FileText className="w-4 h-4 mr-2" /> Preview</Button>
             <Button variant="outline" onClick={handleDownloadPDF} className="rounded-full" data-testid="download-pdf-btn"><Download className="w-4 h-4 mr-2" /> Download PDF</Button>
             <Button variant="outline" onClick={handleSendEmail} disabled={sending} className="rounded-full" data-testid="send-quote-btn">{sending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Mail className="w-4 h-4 mr-2" />} Send Quote</Button>
