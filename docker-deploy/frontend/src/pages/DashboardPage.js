@@ -13,12 +13,9 @@ import { TrendingUp, TrendingDown, Receipt, FileText, Wallet, DollarSign, Plus, 
 const CHART_COLORS = ["#06b6d4", "#d946ef", "#10b981", "#f59e0b", "#8b5cf6"];
 
 function StatCard(props) {
-  const { title, value, icon: Icon, color, onClick } = props;
+  const { title, value, icon: Icon, color } = props;
   return (
-    <Card 
-      className={onClick ? "rounded-3xl bg-card/50 backdrop-blur-xl border-white/10 hover:shadow-glow-cyan transition-all duration-300 cursor-pointer hover:scale-[1.02]" : "rounded-3xl bg-card/50 backdrop-blur-xl border-white/10 hover:shadow-glow-cyan transition-shadow duration-300"}
-      onClick={onClick}
-    >
+    <Card className="rounded-3xl bg-card/50 backdrop-blur-xl border-white/10 hover:shadow-glow-cyan transition-shadow duration-300">
       <CardContent className="p-6">
         <div className="flex items-start justify-between">
           <div>
@@ -188,10 +185,10 @@ export function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard title="Revenue This Month" value={formatCurrency(data?.revenue_this_month || 0)} icon={DollarSign} color="cyan" onClick={function() { navigate("/invoices?status=paid"); }} />
-        <StatCard title="Outstanding" value={formatCurrency(data?.total_outstanding || 0)} icon={Receipt} color="magenta" onClick={function() { navigate("/invoices?status=outstanding"); }} />
-        <StatCard title="Total Invoices" value={data?.invoice_count || 0} icon={FileText} color="cyan" onClick={function() { navigate("/invoices"); }} />
-        <StatCard title="Total Expenses" value={data?.expense_count || 0} icon={Wallet} color="magenta" onClick={function() { navigate("/expenses"); }} />
+        <StatCard title="Revenue This Month" value={formatCurrency(data?.revenue_this_month || 0)} icon={DollarSign} color="cyan" />
+        <StatCard title="Outstanding" value={formatCurrency(data?.total_outstanding || 0)} icon={Receipt} color="magenta" />
+        <StatCard title="Total Invoices" value={data?.invoice_count || 0} icon={FileText} color="cyan" />
+        <StatCard title="Total Expenses" value={data?.expense_count || 0} icon={Wallet} color="magenta" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -236,13 +233,13 @@ export function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <Card className="rounded-3xl bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20 cursor-pointer hover:scale-[1.02] transition-transform" onClick={function() { navigate("/invoices?status=paid"); }}>
+        <Card className="rounded-3xl bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20">
           <CardContent className="p-6 text-center">
             <p className="text-sm text-muted-foreground">Total Revenue</p>
             <p className="text-4xl font-bold font-mono text-primary mt-2">{formatCurrency(reportData?.total_revenue || 0)}</p>
           </CardContent>
         </Card>
-        <Card className="rounded-3xl bg-gradient-to-br from-secondary/10 to-secondary/5 border-secondary/20 cursor-pointer hover:scale-[1.02] transition-transform" onClick={function() { navigate("/expenses"); }}>
+        <Card className="rounded-3xl bg-gradient-to-br from-secondary/10 to-secondary/5 border-secondary/20">
           <CardContent className="p-6 text-center">
             <p className="text-sm text-muted-foreground">Total Expenses</p>
             <p className="text-4xl font-bold font-mono text-secondary mt-2">{formatCurrency(reportData?.total_expenses || 0)}</p>
