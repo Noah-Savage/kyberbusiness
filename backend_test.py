@@ -948,6 +948,150 @@ class KyberBusinessAPITester:
         
         return success, response
 
+    def test_invoice_pdf_download(self):
+        """Test invoice PDF download functionality"""
+        if not self.admin_token:
+            print("❌ No admin token available for invoice PDF testing")
+            return False, {}
+
+        headers = {'Authorization': f'Bearer {self.admin_token}'}
+        
+        # First create an invoice to download PDF from
+        invoice_data = {
+            "client_name": "PDF Test Client",
+            "client_email": "pdf-test@example.com",
+            "client_address": "123 PDF St",
+            "items": [
+                {"description": "PDF Test Service", "quantity": 1, "price": 100.00}
+            ],
+            "notes": "Test invoice for PDF download",
+            "due_date": "2024-12-31",
+            "status": "draft"
+        }
+        
+        success, response = self.run_test(
+            "Create Invoice for PDF Test",
+            "POST",
+            "invoices",
+            200,
+            data=invoice_data,
+            headers=headers,
+            description="Create invoice to test PDF download"
+        )
+        
+        if not success or 'id' not in response:
+            print("❌ Cannot test PDF download without creating invoice first")
+            return False, {}
+        
+        invoice_id = response['id']
+        print(f"   Created invoice ID: {invoice_id}")
+        
+        # Test PDF download endpoint - should return PDF file
+        url = f"{self.base_url}/api/invoices/{invoice_id}/pdf"
+        try:
+            import requests
+            response = requests.get(url, headers=headers, timeout=30)
+            
+            self.tests_run += 1
+            print(f"\n🔍 Testing Invoice PDF Download...")
+            print(f"   Description: Should return PDF file for invoice {invoice_id}")
+            
+            if response.status_code == 200:
+                # Check if response is actually a PDF
+                content_type = response.headers.get('content-type', '')
+                if 'application/pdf' in content_type:
+                    self.tests_passed += 1
+                    print(f"✅ Passed - Status: {response.status_code}, Content-Type: {content_type}")
+                    print(f"   PDF size: {len(response.content)} bytes")
+                    return True, {"content_length": len(response.content)}
+                else:
+                    print(f"❌ Failed - Expected PDF content-type, got {content_type}")
+                    self.failed_tests.append({
+                        "name": "Invoice PDF Download",
+                        "expected": "application/pdf",
+                        "actual": content_type,
+                        "endpoint": f"invoices/{invoice_id}/pdf"
+                    })
+                    return False, {}
+            else:
+                print(f"❌ Failed - Expected 200, got {response.status_code}")
+                try:
+                    error_detail = response.json()
+                    print(f"   Error: {error_detail}")
+                except:
+                    print(f"   Response: {response.text[:200]}")
+                self.failed_tests.append({
+                    "name": "Invoice PDF Download",
+                    "expected": 200,
+                    "actual": response.status_code,
+                    "endpoint": f"invoices/{invoice_id}/pdf"
+                })
+                return False, {}
+                
+        except Exception as e:
+            print(f"❌ Failed - Error: {str(e)}")
+            self.tests_run += 1
+            self.failed_tests.append({
+                "name": "Invoice PDF Download",
+                "error": str(e),
+                "endpoint": f"invoices/{invoice_id}/pdf"
+            })
+            return False, {}
+
+    def test_invoice_send_email(self):
+        """Test invoice send email functionality"""
+        if not self.admin_token:
+            print("❌ No admin token available for invoice email testing")
+            return False, {}
+
+        headers = {'Authorization': f'Bearer {self.admin_token}'}
+        
+        # First create an invoice to send email
+        invoice_data = {
+            "client_name": "Email Test Client",
+            "client_email": "email-test@example.com",
+            "client_address": "123 Email St",
+            "items": [
+                {"description": "Email Test Service", "quantity": 1, "price": 150.00}
+            ],
+            "notes": "Test invoice for email sending",
+            "due_date": "2024-12-31",
+            "status": "draft"
+        }
+        
+        success, response = self.run_test(
+            "Create Invoice for Email Test",
+            "POST", 
+            "invoices",
+            200,
+            data=invoice_data,
+            headers=headers,
+            description="Create invoice to test email sending"
+        )
+        
+        if not success or 'id' not in response:
+            print("❌ Cannot test send email without creating invoice first")
+            return False, {}
+        
+        invoice_id = response['id']
+        print(f"   Created invoice ID: {invoice_id}")
+        
+        # Test send email endpoint - should return proper response
+        # (400 if SMTP not configured, 200 if configured)
+        send_data = {"frontend_url": self.base_url}
+        
+        success, response = self.run_test(
+            "Send Invoice Email",
+            "POST",
+            f"invoices/{invoice_id}/send",
+            [200, 400],  # Both are acceptable responses
+            data=send_data,
+            headers=headers,
+            description="Should return proper response (400 if SMTP not configured, 200 if configured)"
+        )
+        
+        return success, response
+
     def run_test(self, name, method, endpoint, expected_status, data=None, headers=None, description=""):
         """Run a single API test - updated to handle list of expected status codes"""
         url = f"{self.base_url}/api/{endpoint}"
