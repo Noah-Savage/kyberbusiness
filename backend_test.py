@@ -61,14 +61,15 @@ class KyberBusinessTester:
 
     def test_login(self):
         """Test login and get token"""
-        # Register first with admin email (assuming fresh system)
+        # Try with different admin email
+        admin_email = f"admin{datetime.now().strftime('%H%M%S')}@thestarforge.org"
         success, response = self.run_test(
             "Register Admin User",
             "POST",
             "auth/register",
             200,
             data={
-                "email": "admin@thestarforge.org", 
+                "email": admin_email, 
                 "password": "TestPass123!", 
                 "name": "Test Admin"
             }
