@@ -1,0 +1,202 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Manrope:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    :root {
+        /* Kyber Light Theme - Cyan/Magenta */
+        --background: 210 40% 98%;
+        --foreground: 222 47% 11%;
+        --card: 0 0% 100%;
+        --card-foreground: 222 47% 11%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 222 47% 11%;
+        --primary: 187 86% 43%;
+        --primary-foreground: 0 0% 0%;
+        --secondary: 292 84% 61%;
+        --secondary-foreground: 0 0% 100%;
+        --muted: 210 40% 96%;
+        --muted-foreground: 215 16% 47%;
+        --accent: 210 40% 94%;
+        --accent-foreground: 222 47% 11%;
+        --destructive: 0 84% 60%;
+        --destructive-foreground: 0 0% 98%;
+        --border: 214 32% 91%;
+        --input: 214 32% 91%;
+        --ring: 187 86% 43%;
+        --radius: 1rem;
+        
+        /* Chart colors */
+        --chart-1: 187 86% 43%;
+        --chart-2: 292 84% 61%;
+        --chart-3: 160 84% 39%;
+        --chart-4: 38 92% 50%;
+        --chart-5: 262 83% 58%;
+    }
+
+    .dark {
+        /* Kyber Dark Theme - Neon Crystal */
+        --background: 222 47% 3%;
+        --foreground: 210 40% 98%;
+        --card: 222 47% 7%;
+        --card-foreground: 210 40% 98%;
+        --popover: 222 47% 7%;
+        --popover-foreground: 210 40% 98%;
+        --primary: 187 86% 43%;
+        --primary-foreground: 0 0% 0%;
+        --secondary: 292 84% 61%;
+        --secondary-foreground: 0 0% 100%;
+        --muted: 217 33% 13%;
+        --muted-foreground: 215 20% 65%;
+        --accent: 217 33% 13%;
+        --accent-foreground: 210 40% 98%;
+        --destructive: 0 63% 31%;
+        --destructive-foreground: 210 40% 98%;
+        --border: 217 33% 17%;
+        --input: 217 33% 17%;
+        --ring: 187 86% 43%;
+        
+        /* Chart colors - more vibrant for dark mode */
+        --chart-1: 187 86% 53%;
+        --chart-2: 292 84% 71%;
+        --chart-3: 160 84% 49%;
+        --chart-4: 38 92% 60%;
+        --chart-5: 262 83% 68%;
+    }
+}
+
+@layer base {
+    * {
+        @apply border-border;
+    }
+    
+    body {
+        @apply bg-background text-foreground antialiased;
+        font-family: 'Manrope', sans-serif;
+    }
+    
+    h1, h2, h3, h4, h5, h6 {
+        font-family: 'Outfit', sans-serif;
+    }
+    
+    code, pre, .font-mono {
+        font-family: 'JetBrains Mono', monospace;
+    }
+}
+
+@layer utilities {
+    /* Neon glow effects */
+    .glow-cyan {
+        box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
+    }
+    
+    .glow-magenta {
+        box-shadow: 0 0 20px rgba(217, 70, 239, 0.4);
+    }
+    
+    .glow-cyan-hover:hover {
+        box-shadow: 0 0 30px rgba(6, 182, 212, 0.6);
+    }
+    
+    .glow-magenta-hover:hover {
+        box-shadow: 0 0 30px rgba(217, 70, 239, 0.6);
+    }
+    
+    /* Glassmorphism */
+    .glass {
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .dark .glass {
+        background: rgba(0, 0, 0, 0.2);
+    }
+    
+    /* Gradient text */
+    .gradient-text {
+        background: linear-gradient(135deg, #06b6d4, #d946ef);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+    }
+    
+    /* Material U shapes */
+    .material-card {
+        @apply rounded-3xl bg-card/50 backdrop-blur-xl border border-white/10;
+    }
+    
+    /* Animations */
+    @keyframes float {
+        0%, 100% { transform: translateY(0px); }
+        50% { transform: translateY(-10px); }
+    }
+    
+    @keyframes pulse-glow {
+        0%, 100% { box-shadow: 0 0 20px rgba(6, 182, 212, 0.4); }
+        50% { box-shadow: 0 0 40px rgba(6, 182, 212, 0.6); }
+    }
+    
+    @keyframes shimmer {
+        0% { background-position: -200% 0; }
+        100% { background-position: 200% 0; }
+    }
+    
+    .animate-float {
+        animation: float 3s ease-in-out infinite;
+    }
+    
+    .animate-pulse-glow {
+        animation: pulse-glow 2s ease-in-out infinite;
+    }
+    
+    .animate-shimmer {
+        background: linear-gradient(90deg, transparent, rgba(6, 182, 212, 0.1), transparent);
+        background-size: 200% 100%;
+        animation: shimmer 2s infinite;
+    }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: hsl(var(--muted));
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: hsl(var(--primary) / 0.5);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--primary) / 0.7);
+}
+
+/* Custom selection color */
+::selection {
+    background: hsl(var(--primary) / 0.3);
+    color: hsl(var(--foreground));
+}
+
+/* Debug wrapper handling */
+@layer base {
+    [data-debug-wrapper="true"] {
+        display: contents !important;
+    }
+}
+
+/* Mobile touch targets */
+@media (max-width: 768px) {
+    button, a, [role="button"] {
+        min-height: 44px;
+        min-width: 44px;
+    }
+}
