@@ -78,20 +78,8 @@ class KyberBusinessTester:
         if success and 'access_token' in response:
             self.token = response['access_token']
             print(f"   Token obtained: {self.token[:20]}...")
+            print(f"   Admin email: {admin_email}")
             return True
-        else:
-            # Try login instead
-            success, response = self.run_test(
-                "Login Admin User",
-                "POST", 
-                "auth/login",
-                200,
-                data={"email": "admin@thestarforge.org", "password": "TestPass123!"}
-            )
-            if success and 'access_token' in response:
-                self.token = response['access_token']
-                print(f"   Token obtained: {self.token[:20]}...")
-                return True
         return False
 
     def test_pdf_templates(self):
