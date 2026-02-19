@@ -71,10 +71,33 @@ KyberBusiness is a comprehensive business management application for:
 - aiosmtplib (async email)
 - aiofiles (async file operations)
 
+### February 19, 2026 - Invoice PDF & Preview Features Added
+
+**New Features:**
+
+1. **Invoice PDF Generation**
+   - Added `GET /api/invoices/{id}/pdf` endpoint
+   - PDF includes company branding, invoice details, line items, totals, payment link
+   - Added "Download PDF" button to ViewInvoicePage
+
+2. **Invoice Email with PDF Attachment**
+   - Updated `POST /api/invoices/{id}/send` to include PDF attachment
+   - Email includes payment link button and PDF invoice attachment
+
+3. **PDF Preview for Quotes**
+   - Added "Preview" button to ViewQuotePage
+   - Opens modal dialog with embedded PDF iframe
+   - Can download directly from preview modal
+
+4. **PDF Preview for Invoices**
+   - Added "Preview" button to ViewInvoicePage
+   - Opens modal dialog with embedded PDF iframe
+   - Can download directly from preview modal
+
 **Files Modified:**
-- `/app/backend/server.py` - Added PDF generation and email endpoints
-- `/app/frontend/src/pages/QuotesPages.js` - Added Download PDF and Send Quote buttons
-- `/app/backend/requirements.txt` - Updated dependencies
+- `/app/backend/server.py` - Added invoice PDF generation, updated invoice send to include PDF
+- `/app/frontend/src/pages/QuotesPages.js` - Added Preview button and modal
+- `/app/frontend/src/pages/InvoicesPages.js` - Added Preview, Download PDF buttons and modal
 
 ---
 
@@ -84,10 +107,10 @@ KyberBusiness is a comprehensive business management application for:
 - [x] Quote PDF download
 - [x] Quote email sending
 - [x] Invoices loading
-
-### P1 (High Priority)
-- [ ] Invoice PDF generation endpoint
-- [ ] Invoice PDF email attachment
+- [x] Invoice PDF download
+- [x] Invoice email with PDF attachment
+- [x] Preview functionality for quotes
+- [x] Preview functionality for invoices
 
 ### P2 (Medium Priority)
 - [ ] Batch quote/invoice operations
@@ -102,6 +125,6 @@ KyberBusiness is a comprehensive business management application for:
 ---
 
 ## Next Tasks
-1. Consider adding PDF generation for invoices (similar to quotes)
-2. Add preview functionality for PDFs before download
-3. Implement email delivery tracking/status
+1. Consider batch export functionality for multiple quotes/invoices
+2. Implement email delivery tracking/status
+3. Add custom PDF templates selection
