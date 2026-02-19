@@ -330,9 +330,12 @@ export function ViewInvoicePage() {
   const [sending, setSending] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(null);
+  const [selectedTemplate, setSelectedTemplate] = useState("professional");
+  const [templates, setTemplates] = useState([]);
 
   useEffect(function() {
     api.get("/invoices/" + id).then(function(data) { setInvoice(data); }).catch(function() { toast.error("Failed to load invoice"); navigate("/invoices"); }).finally(function() { setLoading(false); });
+    api.get("/pdf-templates").then(function(data) { setTemplates(data); }).catch(function() {});
   }, [id, navigate]);
 
   function handleDelete() {
@@ -347,7 +350,7 @@ export function ViewInvoicePage() {
 
   function handleSendInvoice() {
     setSending(true);
-    api.post("/invoices/" + id + "/send", { frontend_url: window.location.origin })
+    api.post("/invoices/" + id + "/send", { frontend_url: window.location.origin, template: selectedTemplate })
       .then(function(data) { 
         toast.success("Invoice sent to " + invoice.client_email); 
         // Refresh invoice to get updated status
@@ -359,7 +362,7 @@ export function ViewInvoicePage() {
 
   function handleDownloadPDF() {
     const token = localStorage.getItem("token");
-    const url = process.env.REACT_APP_BACKEND_URL + "/api/invoices/" + id + "/pdf";
+    const url = process.env.REACT_APP_BACKEND_URL + "/api/invoices/" + id + "/pdf?template=" + selectedTemplate;
     fetch(url, { headers: { "Authorization": "Bearer " + token } })
       .then(function(response) {
         if (!response.ok) throw new Error("Failed to download PDF");
@@ -381,7 +384,7 @@ export function ViewInvoicePage() {
 
   function handlePreviewPDF() {
     const token = localStorage.getItem("token");
-    const url = process.env.REACT_APP_BACKEND_URL + "/api/invoices/" + id + "/pdf";
+    const url = process.env.REACT_APP_BACKEND_URL + "/api/invoices/" + id + "/pdf?template=" + selectedTemplate;
     fetch(url, { headers: { "Authorization": "Bearer " + token } })
       .then(function(response) {
         if (!response.ok) throw new Error("Failed to load preview");
@@ -397,6 +400,7 @@ export function ViewInvoicePage() {
 
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
   if (!invoice) return null;
+
 
   const itemRows = [];
   for (let i = 0; i < invoice.items.length; i++) {
