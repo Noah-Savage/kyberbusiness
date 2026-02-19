@@ -927,25 +927,25 @@ def generate_invoice_pdf(invoice: dict, branding: dict = None, payment_link: str
     
     table = Table(table_data, colWidths=[3.5*inch, 0.75*inch, 1*inch, 1*inch])
     table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#06b6d4')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('BACKGROUND', (0, 0), (-1, 0), header_bg),
+        ('TEXTCOLOR', (0, 0), (-1, 0), text_color),
         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
         ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 0), (-1, 0), f'{tmpl["font"]}-Bold' if tmpl["font"] == "Helvetica" else tmpl["font"]),
         ('FONTSIZE', (0, 0), (-1, 0), 11),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
         ('BACKGROUND', (0, 1), (-1, -4), colors.white),
         ('GRID', (0, 0), (-1, -4), 1, colors.lightgrey),
-        ('FONTNAME', (2, -3), (2, -1), 'Helvetica-Bold'),
-        ('FONTNAME', (3, -1), (3, -1), 'Helvetica-Bold'),
-        ('TEXTCOLOR', (3, -1), (3, -1), colors.HexColor('#06b6d4')),
+        ('FONTNAME', (2, -3), (2, -1), f'{tmpl["font"]}-Bold' if tmpl["font"] == "Helvetica" else tmpl["font"]),
+        ('FONTNAME', (3, -1), (3, -1), f'{tmpl["font"]}-Bold' if tmpl["font"] == "Helvetica" else tmpl["font"]),
+        ('TEXTCOLOR', (3, -1), (3, -1), primary_color),
     ]))
     elements.append(table)
     
     # Payment link
     if payment_link:
         elements.append(Spacer(1, 20))
-        link_style = ParagraphStyle('Link', parent=normal_style, textColor=colors.HexColor('#06b6d4'))
+        link_style = ParagraphStyle('Link', parent=normal_style, textColor=primary_color)
         elements.append(Paragraph(f"<b>Pay Online:</b> <a href='{payment_link}'>{payment_link}</a>", link_style))
     
     # Notes
@@ -959,7 +959,7 @@ def generate_invoice_pdf(invoice: dict, branding: dict = None, payment_link: str
     return buffer
 
 @api_router.get("/invoices/{invoice_id}/pdf")
-async def get_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_user)):
+async def get_invoice_pdf(invoice_id: str, template: str = Query("professional"), user: dict = Depends(get_current_user)):
     """Generate and return PDF for an invoice"""
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
