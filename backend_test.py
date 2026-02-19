@@ -250,17 +250,33 @@ class KyberBusinessAPITester:
         return success, response
 
     def test_invoices_crud(self):
-        """Test invoices CRUD operations"""
+        """Test invoices CRUD operations (Bug Fix #3)"""
         if not self.admin_token:
             print("❌ No admin token available for invoices testing")
             return False, {}
 
         headers = {'Authorization': f'Bearer {self.admin_token}'}
         
+        # First test GET /api/invoices directly (this was reported as returning 500)
+        success, response = self.run_test(
+            "List Invoices (Bug Fix Test)",
+            "GET",
+            "invoices",
+            200,
+            headers=headers,
+            description="Test /api/invoices endpoint that was returning 500 errors"
+        )
+        
+        if not success:
+            print("❌ Critical issue: /api/invoices endpoint still returning errors")
+            return False, {}
+        
+        print("✅ /api/invoices endpoint working correctly now")
+        
         # Create invoice
         invoice_data = {
             "client_name": "Test Client",
-            "client_email": "client@example.com",
+            "client_email": "client@example.com", 
             "client_address": "123 Test St",
             "items": [
                 {"description": "Test Service", "quantity": 2, "price": 50.00}
@@ -292,14 +308,14 @@ class KyberBusinessAPITester:
                 description="Should be able to retrieve created invoice"
             )
             
-            # List invoices
+            # List invoices again to make sure it still works after creating one
             self.run_test(
-                "List Invoices",
+                "List Invoices Again",
                 "GET",
                 "invoices",
                 200,
                 headers=headers,
-                description="Should be able to list all invoices"
+                description="Should still be able to list all invoices after creation"
             )
         
         return success, response
