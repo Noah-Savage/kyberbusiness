@@ -393,6 +393,7 @@ export function ViewQuotePage() {
         </div>
         {canEdit && quote.status !== "converted" && (
           <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={handlePreviewPDF} className="rounded-full" data-testid="preview-quote-btn"><FileText className="w-4 h-4 mr-2" /> Preview</Button>
             <Button variant="outline" onClick={handleDownloadPDF} className="rounded-full" data-testid="download-pdf-btn"><Download className="w-4 h-4 mr-2" /> Download PDF</Button>
             <Button variant="outline" onClick={handleSendEmail} disabled={sending} className="rounded-full" data-testid="send-quote-btn">{sending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Mail className="w-4 h-4 mr-2" />} Send Quote</Button>
             <Button variant="outline" onClick={function() { navigate("/quotes/" + id + "/edit"); }} className="rounded-full"><Edit className="w-4 h-4 mr-2" /> Edit</Button>
