@@ -1181,7 +1181,13 @@ class KyberBusinessAPITester:
         # Bug Fix #2: Send quote email returning 404  
         self.test_quote_send_email()
         
-        # Bug Fix #3: Loading invoices returning 500
+        # Bug Fix #3: Invoice PDF download functionality
+        self.test_invoice_pdf_download()
+        
+        # Bug Fix #4: Invoice send email functionality
+        self.test_invoice_send_email()
+        
+        # Bug Fix #5: Loading invoices returning 500
         self.test_invoices_crud()
         
         print("\n" + "📋 ADDITIONAL FUNCTIONALITY TESTS" + "📋")
