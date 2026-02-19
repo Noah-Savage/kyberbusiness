@@ -550,11 +550,48 @@ async def convert_quote_to_invoice(quote_id: str, user: dict = Depends(require_a
     
     return InvoiceResponse(**{k: v for k, v in invoice_doc.items() if k != "_id"})
 
+# PDF Template definitions
+PDF_TEMPLATES = {
+    "professional": {
+        "name": "Professional",
+        "primary_color": "#06b6d4",
+        "secondary_color": "#0891b2",
+        "header_bg": "#06b6d4",
+        "font": "Helvetica"
+    },
+    "modern": {
+        "name": "Modern",
+        "primary_color": "#8b5cf6",
+        "secondary_color": "#7c3aed",
+        "header_bg": "#8b5cf6",
+        "font": "Helvetica"
+    },
+    "classic": {
+        "name": "Classic",
+        "primary_color": "#1f2937",
+        "secondary_color": "#374151",
+        "header_bg": "#1f2937",
+        "font": "Times-Roman"
+    },
+    "minimal": {
+        "name": "Minimal",
+        "primary_color": "#000000",
+        "secondary_color": "#6b7280",
+        "header_bg": "#f3f4f6",
+        "font": "Helvetica"
+    }
+}
+
 # Helper function to generate PDF for quotes
-def generate_quote_pdf(quote: dict, branding: dict = None) -> BytesIO:
-    """Generate a PDF for a quote"""
+def generate_quote_pdf(quote: dict, branding: dict = None, template: str = "professional") -> BytesIO:
+    """Generate a PDF for a quote with template support"""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=72)
+    
+    # Get template settings
+    tmpl = PDF_TEMPLATES.get(template, PDF_TEMPLATES["professional"])
+    primary_color = colors.HexColor(branding.get("primary_color", tmpl["primary_color"])) if branding else colors.HexColor(tmpl["primary_color"])
+    header_bg = colors.HexColor(tmpl["header_bg"])
     
     elements = []
     styles = getSampleStyleSheet()
