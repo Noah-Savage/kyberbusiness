@@ -81,11 +81,11 @@ class KyberBusinessTester:
         else:
             # Try login instead
             success, response = self.run_test(
-                "Login Test User",
+                "Login Admin User",
                 "POST", 
                 "auth/login",
                 200,
-                data={"email": "test@test.com", "password": "TestPass123!"}
+                data={"email": "admin@thestarforge.org", "password": "TestPass123!"}
             )
             if success and 'access_token' in response:
                 self.token = response['access_token']
