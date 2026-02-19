@@ -592,22 +592,23 @@ def generate_quote_pdf(quote: dict, branding: dict = None, template: str = "prof
     tmpl = PDF_TEMPLATES.get(template, PDF_TEMPLATES["professional"])
     primary_color = colors.HexColor(branding.get("primary_color", tmpl["primary_color"])) if branding else colors.HexColor(tmpl["primary_color"])
     header_bg = colors.HexColor(tmpl["header_bg"])
+    text_color = colors.white if template != "minimal" else colors.HexColor("#1f2937")
     
     elements = []
     styles = getSampleStyleSheet()
     
     # Company name / title
     company_name = branding.get("company_name", "KyberBusiness") if branding else "KyberBusiness"
-    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=24, spaceAfter=20, textColor=colors.HexColor('#06b6d4'))
+    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=24, spaceAfter=20, textColor=primary_color, fontName=tmpl["font"])
     elements.append(Paragraph(company_name, title_style))
     
     # Quote header
-    header_style = ParagraphStyle('Header', parent=styles['Heading2'], fontSize=18, spaceAfter=12)
+    header_style = ParagraphStyle('Header', parent=styles['Heading2'], fontSize=18, spaceAfter=12, fontName=tmpl["font"])
     elements.append(Paragraph(f"QUOTE: {quote['quote_number']}", header_style))
     elements.append(Spacer(1, 12))
     
     # Client info
-    normal_style = styles['Normal']
+    normal_style = ParagraphStyle('Normal', parent=styles['Normal'], fontName=tmpl["font"])
     elements.append(Paragraph(f"<b>Client:</b> {quote['client_name']}", normal_style))
     elements.append(Paragraph(f"<b>Email:</b> {quote['client_email']}", normal_style))
     if quote.get('client_address'):
@@ -637,18 +638,18 @@ def generate_quote_pdf(quote: dict, branding: dict = None, template: str = "prof
     
     table = Table(table_data, colWidths=[3.5*inch, 0.75*inch, 1*inch, 1*inch])
     table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#06b6d4')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('BACKGROUND', (0, 0), (-1, 0), header_bg),
+        ('TEXTCOLOR', (0, 0), (-1, 0), text_color),
         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
         ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 0), (-1, 0), f'{tmpl["font"]}-Bold' if tmpl["font"] == "Helvetica" else tmpl["font"]),
         ('FONTSIZE', (0, 0), (-1, 0), 11),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
         ('BACKGROUND', (0, 1), (-1, -4), colors.white),
         ('GRID', (0, 0), (-1, -4), 1, colors.lightgrey),
-        ('FONTNAME', (2, -3), (2, -1), 'Helvetica-Bold'),
-        ('FONTNAME', (3, -1), (3, -1), 'Helvetica-Bold'),
-        ('TEXTCOLOR', (3, -1), (3, -1), colors.HexColor('#06b6d4')),
+        ('FONTNAME', (2, -3), (2, -1), f'{tmpl["font"]}-Bold' if tmpl["font"] == "Helvetica" else tmpl["font"]),
+        ('FONTNAME', (3, -1), (3, -1), f'{tmpl["font"]}-Bold' if tmpl["font"] == "Helvetica" else tmpl["font"]),
+        ('TEXTCOLOR', (3, -1), (3, -1), primary_color),
     ]))
     elements.append(table)
     
