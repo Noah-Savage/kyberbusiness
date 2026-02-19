@@ -309,6 +309,7 @@ export function ViewQuotePage() {
   const [quote, setQuote] = useState(null);
   const [loading, setLoading] = useState(true);
   const [converting, setConverting] = useState(false);
+  const [sending, setSending] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   useEffect(function() {
@@ -322,6 +323,39 @@ export function ViewQuotePage() {
 
   function handleDelete() {
     api.delete("/quotes/" + id).then(function() { toast.success("Quote deleted"); navigate("/quotes"); }).catch(function(err) { toast.error(err.message); });
+  }
+
+  function handleDownloadPDF() {
+    const token = localStorage.getItem("token");
+    const url = process.env.REACT_APP_BACKEND_URL + "/api/quotes/" + id + "/pdf";
+    fetch(url, { headers: { "Authorization": "Bearer " + token } })
+      .then(function(response) {
+        if (!response.ok) throw new Error("Failed to download PDF");
+        return response.blob();
+      })
+      .then(function(blob) {
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = downloadUrl;
+        a.download = quote.quote_number + ".pdf";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(downloadUrl);
+        toast.success("PDF downloaded");
+      })
+      .catch(function(err) { toast.error(err.message); });
+  }
+
+  function handleSendEmail() {
+    setSending(true);
+    api.post("/quotes/" + id + "/send-email", {})
+      .then(function(data) {
+        toast.success("Quote sent to " + quote.client_email);
+        api.get("/quotes/" + id).then(function(data) { setQuote(data); });
+      })
+      .catch(function(err) { toast.error(err.message || "Failed to send quote"); })
+      .finally(function() { setSending(false); });
   }
 
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
