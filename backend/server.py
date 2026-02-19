@@ -713,8 +713,9 @@ async def send_quote_email(quote_id: str, data: SendQuoteEmailRequest = None, us
     
     smtp_config = smtp_settings.get("data", {})
     
-    # Generate PDF
-    pdf_buffer = generate_quote_pdf(quote, branding)
+    # Generate PDF with template
+    template = data.template if data and data.template else "professional"
+    pdf_buffer = generate_quote_pdf(quote, branding, template)
     
     # Create email
     message = MIMEMultipart("mixed")
