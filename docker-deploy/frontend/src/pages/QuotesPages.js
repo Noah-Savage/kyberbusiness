@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { api, formatCurrency, formatDate, getStatusColor, API_URL } from "../lib/utils";
+import { api, formatCurrency, formatDate, getStatusColor } from "../lib/utils";
 import { useAuth } from "../context/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { Plus, Trash2, Edit, Eye, ArrowLeft, CalendarIcon, FileText, ArrowRightCircle, Loader2, Search, FileDown, Send, Mail } from "lucide-react";
+import { Plus, Trash2, Edit, Eye, ArrowLeft, CalendarIcon, FileText, ArrowRightCircle, Loader2, Search, Download, Mail } from "lucide-react";
 
 function QuoteRow({ quote, canEdit, onView, onEdit }) {
   return (
@@ -309,13 +309,16 @@ export function ViewQuotePage() {
   const [quote, setQuote] = useState(null);
   const [loading, setLoading] = useState(true);
   const [converting, setConverting] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [emailOpen, setEmailOpen] = useState(false);
-  const [customMessage, setCustomMessage] = useState("");
   const [sending, setSending] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [selectedTemplate, setSelectedTemplate] = useState("professional");
+  const [templates, setTemplates] = useState([]);
 
   useEffect(function() {
     api.get("/quotes/" + id).then(function(data) { setQuote(data); }).catch(function() { toast.error("Failed to load quote"); navigate("/quotes"); }).finally(function() { setLoading(false); });
+    api.get("/pdf-templates").then(function(data) { setTemplates(data); }).catch(function() {});
   }, [id, navigate]);
 
   function handleConvert() {
@@ -327,38 +330,52 @@ export function ViewQuotePage() {
     api.delete("/quotes/" + id).then(function() { toast.success("Quote deleted"); navigate("/quotes"); }).catch(function(err) { toast.error(err.message); });
   }
 
-  function downloadPDF() {
+  function handleDownloadPDF() {
     const token = localStorage.getItem("token");
-    fetch(API_URL + "/quotes/" + id + "/pdf", {
-      headers: { "Authorization": "Bearer " + token }
-    }).then(function(response) {
-      if (!response.ok) throw new Error("Failed to download PDF");
-      return response.blob();
-    }).then(function(blob) {
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = quote.quote_number + ".pdf";
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      a.remove();
-      toast.success("PDF downloaded!");
-    }).catch(function(err) {
-      toast.error(err.message);
-    });
+    const url = process.env.REACT_APP_BACKEND_URL + "/api/quotes/" + id + "/pdf?template=" + selectedTemplate;
+    fetch(url, { headers: { "Authorization": "Bearer " + token } })
+      .then(function(response) {
+        if (!response.ok) throw new Error("Failed to download PDF");
+        return response.blob();
+      })
+      .then(function(blob) {
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = downloadUrl;
+        a.download = quote.quote_number + ".pdf";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(downloadUrl);
+        toast.success("PDF downloaded");
+      })
+      .catch(function(err) { toast.error(err.message); });
   }
 
-  function sendEmail() {
+  function handlePreviewPDF() {
+    const token = localStorage.getItem("token");
+    const url = process.env.REACT_APP_BACKEND_URL + "/api/quotes/" + id + "/pdf?template=" + selectedTemplate;
+    fetch(url, { headers: { "Authorization": "Bearer " + token } })
+      .then(function(response) {
+        if (!response.ok) throw new Error("Failed to load preview");
+        return response.blob();
+      })
+      .then(function(blob) {
+        const blobUrl = window.URL.createObjectURL(blob);
+        setPreviewUrl(blobUrl);
+        setPreviewOpen(true);
+      })
+      .catch(function(err) { toast.error(err.message); });
+  }
+
+  function handleSendEmail() {
     setSending(true);
-    api.post("/quotes/" + id + "/send-email", { custom_message: customMessage })
-      .then(function() {
+    api.post("/quotes/" + id + "/send-email", { template: selectedTemplate })
+      .then(function(data) {
         toast.success("Quote sent to " + quote.client_email);
-        setEmailOpen(false);
-        setCustomMessage("");
         api.get("/quotes/" + id).then(function(data) { setQuote(data); });
       })
-      .catch(function(err) { toast.error(err.message); })
+      .catch(function(err) { toast.error(err.message || "Failed to send quote"); })
       .finally(function() { setSending(false); });
   }
 
@@ -377,21 +394,19 @@ export function ViewQuotePage() {
           <Button variant="ghost" size="icon" onClick={function() { navigate("/quotes"); }} className="rounded-full"><ArrowLeft className="w-5 h-5" /></Button>
           <div><h1 className="text-3xl font-bold font-heading">{quote.quote_number}</h1><Badge className={getStatusColor(quote.status) + " capitalize mt-1"}>{quote.status}</Badge></div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={downloadPDF} className="rounded-full" data-testid="download-pdf-btn"><FileDown className="w-4 h-4 mr-2" /> Download PDF</Button>
-          {canEdit && (
-            <>
-              <Button variant="outline" onClick={function() { setEmailOpen(true); }} className="rounded-full" data-testid="send-email-btn"><Send className="w-4 h-4 mr-2" /> Send Email</Button>
-              {quote.status !== "converted" && (
-                <>
-                  <Button variant="outline" onClick={function() { navigate("/quotes/" + id + "/edit"); }} className="rounded-full"><Edit className="w-4 h-4 mr-2" /> Edit</Button>
-                  <Button onClick={handleConvert} disabled={converting} className="rounded-full shadow-glow-magenta bg-secondary">{converting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ArrowRightCircle className="w-4 h-4 mr-2" />}Convert</Button>
-                  <Button variant="destructive" onClick={function() { setDeleteOpen(true); }} className="rounded-full"><Trash2 className="w-4 h-4" /></Button>
-                </>
-              )}
-            </>
-          )}
-        </div>
+        {canEdit && quote.status !== "converted" && (
+          <div className="flex flex-wrap items-center gap-2">
+            <select value={selectedTemplate} onChange={function(e) { setSelectedTemplate(e.target.value); }} className="h-9 px-3 rounded-full border border-input bg-background text-sm" data-testid="template-selector">
+              {templates.map(function(t) { return <option key={t.id} value={t.id}>{t.name}</option>; })}
+            </select>
+            <Button variant="outline" onClick={handlePreviewPDF} className="rounded-full" data-testid="preview-quote-btn"><FileText className="w-4 h-4 mr-2" /> Preview</Button>
+            <Button variant="outline" onClick={handleDownloadPDF} className="rounded-full" data-testid="download-pdf-btn"><Download className="w-4 h-4 mr-2" /> Download PDF</Button>
+            <Button variant="outline" onClick={handleSendEmail} disabled={sending} className="rounded-full" data-testid="send-quote-btn">{sending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Mail className="w-4 h-4 mr-2" />} Send Quote</Button>
+            <Button variant="outline" onClick={function() { navigate("/quotes/" + id + "/edit"); }} className="rounded-full"><Edit className="w-4 h-4 mr-2" /> Edit</Button>
+            <Button onClick={handleConvert} disabled={converting} className="rounded-full shadow-glow-magenta bg-secondary">{converting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ArrowRightCircle className="w-4 h-4 mr-2" />}Convert to Invoice</Button>
+            <Button variant="destructive" onClick={function() { setDeleteOpen(true); }} className="rounded-full"><Trash2 className="w-4 h-4" /></Button>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -431,32 +446,15 @@ export function ViewQuotePage() {
         <DialogFooter><Button variant="outline" onClick={function() { setDeleteOpen(false); }} className="rounded-full">Cancel</Button><Button variant="destructive" onClick={handleDelete} className="rounded-full">Delete</Button></DialogFooter></DialogContent>
       </Dialog>
 
-      <Dialog open={emailOpen} onOpenChange={setEmailOpen}>
-        <DialogContent className="rounded-3xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><Mail className="w-5 h-5 text-secondary" /> Send Quote</DialogTitle>
-            <DialogDescription>Send this quote with PDF attachment to {quote.client_email}</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Custom Message (optional)</Label>
-              <Textarea value={customMessage} onChange={function(e) { setCustomMessage(e.target.value); }} placeholder="Add a personal message to the email..." className="rounded-xl" rows={4} />
-            </div>
-            <div className="p-4 rounded-xl bg-secondary/10">
-              <p className="text-sm text-muted-foreground">The email will include:</p>
-              <ul className="text-sm mt-2 space-y-1">
-                <li>• Quote details ({quote.quote_number})</li>
-                <li>• PDF attachment with your branding</li>
-                <li>• Quote total: {formatCurrency(quote.total)}</li>
-              </ul>
-            </div>
+      <Dialog open={previewOpen} onOpenChange={function(open) { setPreviewOpen(open); if (!open && previewUrl) { window.URL.revokeObjectURL(previewUrl); setPreviewUrl(null); } }}>
+        <DialogContent className="rounded-3xl max-w-4xl h-[80vh]">
+          <DialogHeader><DialogTitle>Quote Preview - {quote.quote_number}</DialogTitle></DialogHeader>
+          <div className="flex-1 h-full min-h-[60vh]">
+            {previewUrl && <iframe src={previewUrl} className="w-full h-full rounded-xl border" title="Quote PDF Preview" />}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={function() { setEmailOpen(false); }} className="rounded-full">Cancel</Button>
-            <Button onClick={sendEmail} disabled={sending} className="rounded-full shadow-glow-magenta bg-secondary">
-              {sending && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
-              <Send className="w-4 h-4 mr-2" /> Send Quote
-            </Button>
+            <Button variant="outline" onClick={function() { setPreviewOpen(false); }} className="rounded-full">Close</Button>
+            <Button onClick={handleDownloadPDF} className="rounded-full shadow-glow-cyan"><Download className="w-4 h-4 mr-2" /> Download</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

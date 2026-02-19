@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { api, formatCurrency, formatDate, getStatusColor } from "../lib/utils";
 import { useAuth } from "../context/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { Plus, Trash2, Edit, Eye, ArrowLeft, CalendarIcon, Receipt, Copy, ExternalLink, Loader2, Search, CreditCard, Mail } from "lucide-react";
+import { Plus, Trash2, Edit, Eye, ArrowLeft, CalendarIcon, Receipt, Copy, ExternalLink, Loader2, Search, CreditCard, Mail, Download, FileText } from "lucide-react";
 
 function InvoiceRow(props) {
   const { invoice, canEdit, onView, onEdit } = props;
@@ -61,16 +61,11 @@ function ViewItemRow(props) {
 
 export function InvoicesPage() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const { canEdit } = useAuth();
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  
-  // Read status filter from URL params
-  const urlStatus = searchParams.get("status");
-  const initialFilter = urlStatus === "outstanding" ? "outstanding" : (urlStatus || "all");
-  const [statusFilter, setStatusFilter] = useState(initialFilter);
+  const [statusFilter, setStatusFilter] = useState("all");
 
   useEffect(function() {
     api.get("/invoices").then(function(data) { setInvoices(data); }).catch(function() { toast.error("Failed to load invoices"); }).finally(function() { setLoading(false); });
@@ -78,15 +73,7 @@ export function InvoicesPage() {
 
   const filtered = invoices.filter(function(inv) {
     const matchesSearch = inv.client_name.toLowerCase().includes(searchTerm.toLowerCase()) || inv.invoice_number.toLowerCase().includes(searchTerm.toLowerCase());
-    let matchesStatus;
-    if (statusFilter === "all") {
-      matchesStatus = true;
-    } else if (statusFilter === "outstanding") {
-      // Outstanding means not paid (draft, sent, or overdue)
-      matchesStatus = inv.status !== "paid";
-    } else {
-      matchesStatus = inv.status === statusFilter;
-    }
+    const matchesStatus = statusFilter === "all" || inv.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
@@ -119,7 +106,6 @@ export function InvoicesPage() {
               <SelectTrigger className="w-[150px] rounded-xl" data-testid="status-filter"><SelectValue placeholder="Status" /></SelectTrigger>
               <SelectContent className="rounded-xl">
                 <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="outstanding">Outstanding</SelectItem>
                 <SelectItem value="draft">Draft</SelectItem>
                 <SelectItem value="sent">Sent</SelectItem>
                 <SelectItem value="paid">Paid</SelectItem>
@@ -155,17 +141,6 @@ export function CreateInvoicePage() {
   const [notes, setNotes] = useState("");
   const [dueDate, setDueDate] = useState(null);
   const [status, setStatus] = useState("draft");
-  const [taxRate, setTaxRate] = useState(10.0);
-  const [shipping, setShipping] = useState(0);
-
-  // Load default tax rate from branding settings
-  useEffect(function() {
-    api.get("/settings/branding").then(function(data) {
-      if (data.default_tax_rate !== undefined) {
-        setTaxRate(data.default_tax_rate);
-      }
-    }).catch(function() {});
-  }, []);
 
   function addItem() { setItems([...items, { description: "", quantity: 1, price: 0 }]); }
   function removeItem(idx) { if (items.length > 1) setItems(items.filter(function(_, i) { return i !== idx; })); }
@@ -177,14 +152,14 @@ export function CreateInvoicePage() {
 
   let subtotal = 0;
   for (let i = 0; i < items.length; i++) { subtotal += items[i].quantity * items[i].price; }
-  const tax = subtotal * (taxRate / 100);
-  const total = subtotal + tax + shipping;
+  const tax = subtotal * 0.1;
+  const total = subtotal + tax;
 
   function handleSubmit(e) {
     e.preventDefault();
     if (!clientName || !clientEmail) { toast.error("Please fill client details"); return; }
     setLoading(true);
-    api.post("/invoices", { client_name: clientName, client_email: clientEmail, client_address: clientAddress, items: items, notes: notes, due_date: dueDate, status: status, tax_rate: taxRate, shipping: shipping })
+    api.post("/invoices", { client_name: clientName, client_email: clientEmail, client_address: clientAddress, items: items, notes: notes, due_date: dueDate, status: status })
       .then(function(invoice) { toast.success("Invoice created"); navigate("/invoices/" + invoice.id); })
       .catch(function(err) { toast.error(err.message); })
       .finally(function() { setLoading(false); });
@@ -218,23 +193,9 @@ export function CreateInvoicePage() {
           <CardHeader className="flex flex-row items-center justify-between"><CardTitle>Line Items</CardTitle><Button type="button" variant="outline" size="sm" onClick={addItem} className="rounded-full"><Plus className="w-4 h-4 mr-1" /> Add</Button></CardHeader>
           <CardContent>
             <div className="space-y-4">{itemRows}</div>
-            <div className="mt-6 pt-6 border-t space-y-3">
+            <div className="mt-6 pt-6 border-t space-y-2">
               <div className="flex justify-between text-sm"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">{formatCurrency(subtotal)}</span></div>
-              <div className="flex justify-between items-center text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">Tax Rate</span>
-                  <Input type="number" step="0.1" min="0" max="100" value={taxRate} onChange={function(e) { setTaxRate(parseFloat(e.target.value) || 0); }} className="w-20 h-8 rounded-lg text-sm" data-testid="tax-rate-input" />
-                  <span className="text-muted-foreground">%</span>
-                </div>
-                <span className="font-mono">{formatCurrency(tax)}</span>
-              </div>
-              <div className="flex justify-between items-center text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">Shipping</span>
-                  <Input type="number" step="0.01" min="0" value={shipping} onChange={function(e) { setShipping(parseFloat(e.target.value) || 0); }} className="w-24 h-8 rounded-lg text-sm" data-testid="shipping-input" />
-                </div>
-                <span className="font-mono">{formatCurrency(shipping)}</span>
-              </div>
+              <div className="flex justify-between text-sm"><span className="text-muted-foreground">Tax (10%)</span><span className="font-mono">{formatCurrency(tax)}</span></div>
               <div className="flex justify-between text-lg font-bold pt-2"><span>Total</span><span className="font-mono text-primary">{formatCurrency(total)}</span></div>
             </div>
           </CardContent>
@@ -279,8 +240,6 @@ export function EditInvoicePage() {
   const [notes, setNotes] = useState("");
   const [dueDate, setDueDate] = useState(null);
   const [status, setStatus] = useState("draft");
-  const [taxRate, setTaxRate] = useState(10.0);
-  const [shipping, setShipping] = useState(0);
 
   useEffect(function() {
     api.get("/invoices/" + id).then(function(data) {
@@ -292,8 +251,6 @@ export function EditInvoicePage() {
       setNotes(data.notes || "");
       setDueDate(data.due_date);
       setStatus(data.status);
-      setTaxRate(data.tax_rate !== undefined ? data.tax_rate : 10.0);
-      setShipping(data.shipping || 0);
     }).catch(function() { toast.error("Failed to load invoice"); navigate("/invoices"); }).finally(function() { setLoading(false); });
   }, [id, navigate]);
 
@@ -307,13 +264,13 @@ export function EditInvoicePage() {
 
   let subtotal = 0;
   for (let i = 0; i < items.length; i++) { subtotal += items[i].quantity * items[i].price; }
-  const tax = subtotal * (taxRate / 100);
-  const total = subtotal + tax + shipping;
+  const tax = subtotal * 0.1;
+  const total = subtotal + tax;
 
   function handleSubmit(e) {
     e.preventDefault();
     setSaving(true);
-    api.put("/invoices/" + id, { client_name: clientName, client_email: clientEmail, client_address: clientAddress, items: items, notes: notes, due_date: dueDate, status: status, tax_rate: taxRate, shipping: shipping })
+    api.put("/invoices/" + id, { client_name: clientName, client_email: clientEmail, client_address: clientAddress, items: items, notes: notes, due_date: dueDate, status: status })
       .then(function() { toast.success("Invoice updated"); navigate("/invoices/" + id); })
       .catch(function(err) { toast.error(err.message); })
       .finally(function() { setSaving(false); });
@@ -349,23 +306,9 @@ export function EditInvoicePage() {
           <CardHeader className="flex flex-row items-center justify-between"><CardTitle>Line Items</CardTitle><Button type="button" variant="outline" size="sm" onClick={addItem} className="rounded-full"><Plus className="w-4 h-4 mr-1" /> Add</Button></CardHeader>
           <CardContent>
             <div className="space-y-4">{itemRows}</div>
-            <div className="mt-6 pt-6 border-t space-y-3">
+            <div className="mt-6 pt-6 border-t space-y-2">
               <div className="flex justify-between text-sm"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">{formatCurrency(subtotal)}</span></div>
-              <div className="flex justify-between items-center text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">Tax Rate</span>
-                  <Input type="number" step="0.1" min="0" max="100" value={taxRate} onChange={function(e) { setTaxRate(parseFloat(e.target.value) || 0); }} className="w-20 h-8 rounded-lg text-sm" data-testid="edit-tax-rate-input" />
-                  <span className="text-muted-foreground">%</span>
-                </div>
-                <span className="font-mono">{formatCurrency(tax)}</span>
-              </div>
-              <div className="flex justify-between items-center text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">Shipping</span>
-                  <Input type="number" step="0.01" min="0" value={shipping} onChange={function(e) { setShipping(parseFloat(e.target.value) || 0); }} className="w-24 h-8 rounded-lg text-sm" data-testid="edit-shipping-input" />
-                </div>
-                <span className="font-mono">{formatCurrency(shipping)}</span>
-              </div>
+              <div className="flex justify-between text-sm"><span className="text-muted-foreground">Tax (10%)</span><span className="font-mono">{formatCurrency(tax)}</span></div>
               <div className="flex justify-between text-lg font-bold pt-2"><span>Total</span><span className="font-mono text-primary">{formatCurrency(total)}</span></div>
             </div>
           </CardContent>
@@ -385,9 +328,14 @@ export function ViewInvoicePage() {
   const [loading, setLoading] = useState(true);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [selectedTemplate, setSelectedTemplate] = useState("professional");
+  const [templates, setTemplates] = useState([]);
 
   useEffect(function() {
     api.get("/invoices/" + id).then(function(data) { setInvoice(data); }).catch(function() { toast.error("Failed to load invoice"); navigate("/invoices"); }).finally(function() { setLoading(false); });
+    api.get("/pdf-templates").then(function(data) { setTemplates(data); }).catch(function() {});
   }, [id, navigate]);
 
   function handleDelete() {
@@ -402,7 +350,7 @@ export function ViewInvoicePage() {
 
   function handleSendInvoice() {
     setSending(true);
-    api.post("/invoices/" + id + "/send", { frontend_url: window.location.origin })
+    api.post("/invoices/" + id + "/send", { frontend_url: window.location.origin, template: selectedTemplate })
       .then(function(data) { 
         toast.success("Invoice sent to " + invoice.client_email); 
         // Refresh invoice to get updated status
@@ -412,8 +360,47 @@ export function ViewInvoicePage() {
       .finally(function() { setSending(false); });
   }
 
+  function handleDownloadPDF() {
+    const token = localStorage.getItem("token");
+    const url = process.env.REACT_APP_BACKEND_URL + "/api/invoices/" + id + "/pdf?template=" + selectedTemplate;
+    fetch(url, { headers: { "Authorization": "Bearer " + token } })
+      .then(function(response) {
+        if (!response.ok) throw new Error("Failed to download PDF");
+        return response.blob();
+      })
+      .then(function(blob) {
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = downloadUrl;
+        a.download = invoice.invoice_number + ".pdf";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(downloadUrl);
+        toast.success("PDF downloaded");
+      })
+      .catch(function(err) { toast.error(err.message); });
+  }
+
+  function handlePreviewPDF() {
+    const token = localStorage.getItem("token");
+    const url = process.env.REACT_APP_BACKEND_URL + "/api/invoices/" + id + "/pdf?template=" + selectedTemplate;
+    fetch(url, { headers: { "Authorization": "Bearer " + token } })
+      .then(function(response) {
+        if (!response.ok) throw new Error("Failed to load preview");
+        return response.blob();
+      })
+      .then(function(blob) {
+        const blobUrl = window.URL.createObjectURL(blob);
+        setPreviewUrl(blobUrl);
+        setPreviewOpen(true);
+      })
+      .catch(function(err) { toast.error(err.message); });
+  }
+
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
   if (!invoice) return null;
+
 
   const itemRows = [];
   for (let i = 0; i < invoice.items.length; i++) {
@@ -428,12 +415,17 @@ export function ViewInvoicePage() {
           <div><h1 className="text-3xl font-bold font-heading">{invoice.invoice_number}</h1><Badge className={getStatusColor(invoice.status) + " capitalize mt-1"}>{invoice.status}</Badge></div>
         </div>
         {canEdit && (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <select value={selectedTemplate} onChange={function(e) { setSelectedTemplate(e.target.value); }} className="h-9 px-3 rounded-full border border-input bg-background text-sm" data-testid="invoice-template-selector">
+              {templates.map(function(t) { return <option key={t.id} value={t.id}>{t.name}</option>; })}
+            </select>
+            <Button variant="outline" onClick={handlePreviewPDF} className="rounded-full" data-testid="preview-invoice-btn"><FileText className="w-4 h-4 mr-2" /> Preview</Button>
+            <Button variant="outline" onClick={handleDownloadPDF} className="rounded-full" data-testid="download-invoice-pdf-btn"><Download className="w-4 h-4 mr-2" /> Download PDF</Button>
             <Button variant="outline" onClick={handleSendInvoice} disabled={sending || invoice.status === "paid"} className="rounded-full" data-testid="send-invoice-btn">
               {sending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Mail className="w-4 h-4 mr-2" />} Send Invoice
             </Button>
-            <Button variant="outline" onClick={copyPaymentLink} className="rounded-full" data-testid="copy-payment-link"><Copy className="w-4 h-4 mr-2" /> Copy Payment Link</Button>
-            <Button variant="outline" onClick={function() { window.open("/pay/" + id, "_blank"); }} className="rounded-full" data-testid="open-payment-page"><ExternalLink className="w-4 h-4 mr-2" /> Payment Page</Button>
+            <Button variant="outline" onClick={copyPaymentLink} className="rounded-full" data-testid="copy-payment-link"><Copy className="w-4 h-4 mr-2" /> Copy Link</Button>
+            <Button variant="outline" onClick={function() { window.open("/pay/" + id, "_blank"); }} className="rounded-full" data-testid="open-payment-page"><ExternalLink className="w-4 h-4 mr-2" /> Payment</Button>
             <Button variant="outline" onClick={function() { navigate("/invoices/" + id + "/edit"); }} className="rounded-full" data-testid="edit-invoice-btn"><Edit className="w-4 h-4 mr-2" /> Edit</Button>
             <Button variant="destructive" onClick={function() { setDeleteOpen(true); }} className="rounded-full" data-testid="delete-invoice-btn"><Trash2 className="w-4 h-4" /></Button>
           </div>
@@ -450,8 +442,7 @@ export function ViewInvoicePage() {
             </Table>
             <div className="mt-6 pt-6 border-t space-y-2">
               <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">{formatCurrency(invoice.subtotal)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Tax ({invoice.tax_rate || 10}%)</span><span className="font-mono">{formatCurrency(invoice.tax)}</span></div>
-              {invoice.shipping > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Shipping</span><span className="font-mono">{formatCurrency(invoice.shipping)}</span></div>}
+              <div className="flex justify-between"><span className="text-muted-foreground">Tax (10%)</span><span className="font-mono">{formatCurrency(invoice.tax)}</span></div>
               <div className="flex justify-between text-xl font-bold pt-2"><span>Total</span><span className="font-mono text-primary">{formatCurrency(invoice.total)}</span></div>
             </div>
           </CardContent>
@@ -480,13 +471,25 @@ export function ViewInvoicePage() {
             </Card>
           )}
           {invoice.notes && <Card className="rounded-3xl bg-card/50 backdrop-blur-xl border-white/10"><CardHeader><CardTitle>Notes</CardTitle></CardHeader><CardContent><p className="text-muted-foreground">{invoice.notes}</p></CardContent></Card>}
-          {invoice.terms && <Card className="rounded-3xl bg-card/50 backdrop-blur-xl border-white/10"><CardHeader><CardTitle>Terms & Conditions</CardTitle></CardHeader><CardContent><p className="text-muted-foreground whitespace-pre-wrap text-sm">{invoice.terms}</p></CardContent></Card>}
         </div>
       </div>
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="rounded-3xl"><DialogHeader><DialogTitle>Delete Invoice</DialogTitle><DialogDescription>Are you sure? This cannot be undone.</DialogDescription></DialogHeader>
         <DialogFooter><Button variant="outline" onClick={function() { setDeleteOpen(false); }} className="rounded-full">Cancel</Button><Button variant="destructive" onClick={handleDelete} className="rounded-full">Delete</Button></DialogFooter></DialogContent>
+      </Dialog>
+
+      <Dialog open={previewOpen} onOpenChange={function(open) { setPreviewOpen(open); if (!open && previewUrl) { window.URL.revokeObjectURL(previewUrl); setPreviewUrl(null); } }}>
+        <DialogContent className="rounded-3xl max-w-4xl h-[80vh]">
+          <DialogHeader><DialogTitle>Invoice Preview - {invoice.invoice_number}</DialogTitle></DialogHeader>
+          <div className="flex-1 h-full min-h-[60vh]">
+            {previewUrl && <iframe src={previewUrl} className="w-full h-full rounded-xl border" title="Invoice PDF Preview" />}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={function() { setPreviewOpen(false); }} className="rounded-full">Close</Button>
+            <Button onClick={handleDownloadPDF} className="rounded-full shadow-glow-cyan"><Download className="w-4 h-4 mr-2" /> Download</Button>
+          </DialogFooter>
+        </DialogContent>
       </Dialog>
     </div>
   );

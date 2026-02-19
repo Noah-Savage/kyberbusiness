@@ -1,6 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, UploadFile, File, Form, Query, BackgroundTasks
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -17,10 +17,18 @@ from cryptography.fernet import Fernet
 import aiosmtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 import base64
 import secrets
 import aiofiles
 from bson import ObjectId
+from io import BytesIO
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.units import inch
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -47,9 +55,6 @@ cipher_suite = Fernet(ENCRYPTION_KEY.encode() if isinstance(ENCRYPTION_KEY, str)
 app = FastAPI(title="KyberBusiness API")
 api_router = APIRouter(prefix="/api")
 security = HTTPBearer()
-
-# Mount static files for uploaded images - serves at /uploads without /api prefix
-app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 # ==================== MODELS ====================
 
@@ -113,8 +118,6 @@ class InvoiceCreate(BaseModel):
     notes: Optional[str] = ""
     due_date: Optional[str] = None
     status: str = "draft"
-    tax_rate: Optional[float] = 10.0  # Default 10%
-    shipping: Optional[float] = 0.0
 
 class InvoiceResponse(BaseModel):
     id: str
@@ -124,12 +127,9 @@ class InvoiceResponse(BaseModel):
     client_address: str
     items: List[Dict[str, Any]]
     subtotal: float
-    tax_rate: float
     tax: float
-    shipping: float
     total: float
     notes: str
-    terms: Optional[str]
     due_date: Optional[str]
     status: str
     payment_link: Optional[str]
@@ -184,11 +184,10 @@ class SMTPSettings(BaseModel):
     host: str
     port: int
     username: str
-    password: Optional[str] = None
+    password: str
     from_email: str
     from_name: str
-    use_tls: bool = True  # For port 465 (direct SSL)
-    use_starttls: bool = True  # For port 587 (STARTTLS)
+    use_tls: bool = True
 
 class PayPalSettings(BaseModel):
     client_id: str
@@ -211,8 +210,6 @@ class BrandingSettings(BaseModel):
     phone: Optional[str] = ""
     email: Optional[str] = ""
     website: Optional[str] = ""
-    default_tax_rate: Optional[float] = 10.0
-    terms_and_conditions: Optional[str] = ""
 
 class EmailTemplateResponse(BaseModel):
     id: str
@@ -282,64 +279,36 @@ async def require_accountant_or_admin(user: dict = Depends(get_current_user)):
 def generate_number(prefix: str) -> str:
     return f"{prefix}-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{secrets.token_hex(4).upper()}"
 
-def calculate_totals(items: List[Dict[str, Any]], tax_rate: float = 10.0, shipping: float = 0.0) -> tuple:
+def calculate_totals(items: List[Dict[str, Any]]) -> tuple:
     subtotal = sum(item.get("quantity", 1) * item.get("price", 0) for item in items)
-    tax = subtotal * (tax_rate / 100)
-    total = subtotal + tax + shipping
+    tax = subtotal * 0.1  # 10% tax
+    total = subtotal + tax
     return subtotal, tax, total
 
 async def send_email(to_email: str, subject: str, body_html: str):
     settings = await db.settings.find_one({"type": "smtp"}, {"_id": 0})
     if not settings:
-        raise HTTPException(status_code=400, detail="SMTP not configured. Please configure SMTP settings first.")
-    
-    smtp_config = settings.get("data", {})
-    
-    # Validate required fields
-    if not smtp_config.get("host"):
-        raise HTTPException(status_code=400, detail="SMTP host is not configured")
-    if not smtp_config.get("password"):
-        raise HTTPException(status_code=400, detail="SMTP password is not configured")
-    if not smtp_config.get("from_email"):
-        raise HTTPException(status_code=400, detail="From email is not configured")
+        raise HTTPException(status_code=400, detail="SMTP not configured")
     
     try:
+        smtp_config = settings.get("data", {})
         message = MIMEMultipart("alternative")
         message["From"] = f"{smtp_config.get('from_name', 'KyberBusiness')} <{smtp_config.get('from_email')}>"
         message["To"] = to_email
         message["Subject"] = subject
         message.attach(MIMEText(body_html, "html"))
         
-        port = int(smtp_config.get("port", 587))
-        use_tls = smtp_config.get("use_tls", False)  # Direct TLS (port 465)
-        use_starttls = smtp_config.get("use_starttls", True)  # STARTTLS (port 587)
-        
-        # Port 465 typically uses direct TLS, port 587 uses STARTTLS
-        if port == 465:
-            use_tls = True
-            use_starttls = False
-        elif port == 587:
-            use_tls = False
-            use_starttls = True
-        
         await aiosmtplib.send(
             message,
             hostname=smtp_config.get("host"),
-            port=port,
+            port=smtp_config.get("port"),
             username=smtp_config.get("username"),
             password=decrypt_data(smtp_config.get("password")),
-            use_tls=use_tls,
-            start_tls=use_starttls
+            use_tls=smtp_config.get("use_tls", True)
         )
-    except aiosmtplib.SMTPAuthenticationError as e:
-        logging.error(f"SMTP authentication failed: {e}")
-        raise HTTPException(status_code=400, detail="SMTP authentication failed. Check your SMTP credentials in settings.")
-    except aiosmtplib.SMTPConnectError as e:
-        logging.error(f"SMTP connection failed: {e}")
-        raise HTTPException(status_code=400, detail=f"Failed to connect to SMTP server: {str(e)}")
     except Exception as e:
         logging.error(f"Failed to send email: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to send email")
 
 # ==================== AUTH ROUTES ====================
 
@@ -581,18 +550,232 @@ async def convert_quote_to_invoice(quote_id: str, user: dict = Depends(require_a
     
     return InvoiceResponse(**{k: v for k, v in invoice_doc.items() if k != "_id"})
 
+# PDF Template definitions
+PDF_TEMPLATES = {
+    "professional": {
+        "name": "Professional",
+        "primary_color": "#06b6d4",
+        "secondary_color": "#0891b2",
+        "header_bg": "#06b6d4",
+        "font": "Helvetica"
+    },
+    "modern": {
+        "name": "Modern",
+        "primary_color": "#8b5cf6",
+        "secondary_color": "#7c3aed",
+        "header_bg": "#8b5cf6",
+        "font": "Helvetica"
+    },
+    "classic": {
+        "name": "Classic",
+        "primary_color": "#1f2937",
+        "secondary_color": "#374151",
+        "header_bg": "#1f2937",
+        "font": "Times-Roman"
+    },
+    "minimal": {
+        "name": "Minimal",
+        "primary_color": "#000000",
+        "secondary_color": "#6b7280",
+        "header_bg": "#f3f4f6",
+        "font": "Helvetica"
+    }
+}
+
+# Helper function to generate PDF for quotes
+def generate_quote_pdf(quote: dict, branding: dict = None, template: str = "professional") -> BytesIO:
+    """Generate a PDF for a quote with template support"""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=72)
+    
+    # Get template settings
+    tmpl = PDF_TEMPLATES.get(template, PDF_TEMPLATES["professional"])
+    primary_color = colors.HexColor(branding.get("primary_color", tmpl["primary_color"])) if branding else colors.HexColor(tmpl["primary_color"])
+    header_bg = colors.HexColor(tmpl["header_bg"])
+    text_color = colors.white if template != "minimal" else colors.HexColor("#1f2937")
+    
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Company name / title
+    company_name = branding.get("company_name", "KyberBusiness") if branding else "KyberBusiness"
+    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=24, spaceAfter=20, textColor=primary_color, fontName=tmpl["font"])
+    elements.append(Paragraph(company_name, title_style))
+    
+    # Quote header
+    header_style = ParagraphStyle('Header', parent=styles['Heading2'], fontSize=18, spaceAfter=12, fontName=tmpl["font"])
+    elements.append(Paragraph(f"QUOTE: {quote['quote_number']}", header_style))
+    elements.append(Spacer(1, 12))
+    
+    # Client info
+    normal_style = ParagraphStyle('Normal', parent=styles['Normal'], fontName=tmpl["font"])
+    elements.append(Paragraph(f"<b>Client:</b> {quote['client_name']}", normal_style))
+    elements.append(Paragraph(f"<b>Email:</b> {quote['client_email']}", normal_style))
+    if quote.get('client_address'):
+        elements.append(Paragraph(f"<b>Address:</b> {quote['client_address']}", normal_style))
+    elements.append(Paragraph(f"<b>Date:</b> {quote['created_at'][:10]}", normal_style))
+    if quote.get('valid_until'):
+        elements.append(Paragraph(f"<b>Valid Until:</b> {quote['valid_until']}", normal_style))
+    elements.append(Spacer(1, 20))
+    
+    # Items table
+    table_data = [['Description', 'Qty', 'Price', 'Total']]
+    for item in quote['items']:
+        qty = item.get('quantity', 1)
+        price = item.get('price', 0)
+        total = qty * price
+        table_data.append([
+            item.get('description', ''),
+            str(qty),
+            f"${price:.2f}",
+            f"${total:.2f}"
+        ])
+    
+    # Add totals
+    table_data.append(['', '', 'Subtotal:', f"${quote['subtotal']:.2f}"])
+    table_data.append(['', '', 'Tax (10%):', f"${quote['tax']:.2f}"])
+    table_data.append(['', '', 'Total:', f"${quote['total']:.2f}"])
+    
+    table = Table(table_data, colWidths=[3.5*inch, 0.75*inch, 1*inch, 1*inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), header_bg),
+        ('TEXTCOLOR', (0, 0), (-1, 0), text_color),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+        ('FONTNAME', (0, 0), (-1, 0), f'{tmpl["font"]}-Bold' if tmpl["font"] == "Helvetica" else tmpl["font"]),
+        ('FONTSIZE', (0, 0), (-1, 0), 11),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -4), colors.white),
+        ('GRID', (0, 0), (-1, -4), 1, colors.lightgrey),
+        ('FONTNAME', (2, -3), (2, -1), f'{tmpl["font"]}-Bold' if tmpl["font"] == "Helvetica" else tmpl["font"]),
+        ('FONTNAME', (3, -1), (3, -1), f'{tmpl["font"]}-Bold' if tmpl["font"] == "Helvetica" else tmpl["font"]),
+        ('TEXTCOLOR', (3, -1), (3, -1), primary_color),
+    ]))
+    elements.append(table)
+    
+    # Notes
+    if quote.get('notes'):
+        elements.append(Spacer(1, 20))
+        elements.append(Paragraph("<b>Notes:</b>", normal_style))
+        elements.append(Paragraph(quote['notes'], normal_style))
+    
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+@api_router.get("/pdf-templates")
+async def get_pdf_templates(user: dict = Depends(get_current_user)):
+    """Get available PDF templates"""
+    return [{"id": k, "name": v["name"]} for k, v in PDF_TEMPLATES.items()]
+
+@api_router.get("/quotes/{quote_id}/pdf")
+async def get_quote_pdf(quote_id: str, template: str = Query("professional"), user: dict = Depends(get_current_user)):
+    """Generate and return PDF for a quote"""
+    quote = await db.quotes.find_one({"id": quote_id}, {"_id": 0})
+    if not quote:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    
+    # Get branding settings
+    branding_doc = await db.settings.find_one({"type": "branding"}, {"_id": 0})
+    branding = branding_doc.get("data", {}) if branding_doc else {}
+    
+    # Generate PDF with template
+    pdf_buffer = generate_quote_pdf(quote, branding, template)
+    
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={quote['quote_number']}.pdf"
+        }
+    )
+
+class SendQuoteEmailRequest(BaseModel):
+    frontend_url: Optional[str] = None
+    template: Optional[str] = "professional"
+
+@api_router.post("/quotes/{quote_id}/send-email")
+async def send_quote_email(quote_id: str, data: SendQuoteEmailRequest = None, user: dict = Depends(require_accountant_or_admin)):
+    """Send quote email to client with PDF attachment"""
+    quote = await db.quotes.find_one({"id": quote_id}, {"_id": 0})
+    if not quote:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    
+    # Get branding settings
+    branding_doc = await db.settings.find_one({"type": "branding"}, {"_id": 0})
+    branding = branding_doc.get("data", {}) if branding_doc else {}
+    company_name = branding.get("company_name", "KyberBusiness")
+    
+    # Get SMTP settings
+    smtp_settings = await db.settings.find_one({"type": "smtp"}, {"_id": 0})
+    if not smtp_settings:
+        raise HTTPException(status_code=400, detail="SMTP not configured. Please configure email settings first.")
+    
+    smtp_config = smtp_settings.get("data", {})
+    
+    # Generate PDF with template
+    template = data.template if data and data.template else "professional"
+    pdf_buffer = generate_quote_pdf(quote, branding, template)
+    
+    # Create email
+    message = MIMEMultipart("mixed")
+    message["From"] = f"{smtp_config.get('from_name', company_name)} <{smtp_config.get('from_email')}>"
+    message["To"] = quote["client_email"]
+    message["Subject"] = f"Quote {quote['quote_number']} from {company_name}"
+    
+    # HTML body
+    html_body = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h1 style="color: #06b6d4;">Quote {quote['quote_number']}</h1>
+        <p>Dear {quote['client_name']},</p>
+        <p>Please find attached your quote from {company_name}.</p>
+        <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 5px 0;"><strong>Quote Number:</strong> {quote['quote_number']}</p>
+            <p style="margin: 5px 0;"><strong>Total:</strong> ${quote['total']:.2f}</p>
+            {f"<p style='margin: 5px 0;'><strong>Valid Until:</strong> {quote['valid_until']}</p>" if quote.get('valid_until') else ""}
+        </div>
+        <p>If you have any questions, please don't hesitate to contact us.</p>
+        <p>Best regards,<br>{company_name}</p>
+    </div>
+    """
+    
+    # Attach HTML body
+    html_part = MIMEText(html_body, "html")
+    message.attach(html_part)
+    
+    # Attach PDF
+    pdf_attachment = MIMEBase("application", "pdf")
+    pdf_attachment.set_payload(pdf_buffer.read())
+    encoders.encode_base64(pdf_attachment)
+    pdf_attachment.add_header("Content-Disposition", f"attachment; filename={quote['quote_number']}.pdf")
+    message.attach(pdf_attachment)
+    
+    # Send email
+    try:
+        await aiosmtplib.send(
+            message,
+            hostname=smtp_config.get("host"),
+            port=smtp_config.get("port"),
+            username=smtp_config.get("username"),
+            password=decrypt_data(smtp_config.get("password")),
+            use_tls=smtp_config.get("use_tls", True)
+        )
+    except Exception as e:
+        logging.error(f"Failed to send quote email: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
+    
+    # Update quote status to sent if it was draft
+    if quote["status"] == "draft":
+        await db.quotes.update_one({"id": quote_id}, {"$set": {"status": "sent"}})
+    
+    return {"message": "Quote sent successfully", "sent_to": quote["client_email"]}
+
 # ==================== INVOICES ROUTES ====================
 
 @api_router.post("/invoices", response_model=InvoiceResponse)
 async def create_invoice(data: InvoiceCreate, user: dict = Depends(require_accountant_or_admin)):
-    tax_rate = data.tax_rate if data.tax_rate is not None else 10.0
-    shipping = data.shipping if data.shipping is not None else 0.0
-    subtotal, tax, total = calculate_totals(data.items, tax_rate, shipping)
+    subtotal, tax, total = calculate_totals(data.items)
     invoice_id = str(uuid.uuid4())
-    
-    # Get terms from branding settings
-    branding = await db.settings.find_one({"type": "branding"}, {"_id": 0})
-    terms = branding.get("data", {}).get("terms_and_conditions", "") if branding else ""
     
     invoice_doc = {
         "id": invoice_id,
@@ -602,12 +785,9 @@ async def create_invoice(data: InvoiceCreate, user: dict = Depends(require_accou
         "client_address": data.client_address or "",
         "items": data.items,
         "subtotal": subtotal,
-        "tax_rate": tax_rate,
         "tax": tax,
-        "shipping": shipping,
         "total": total,
         "notes": data.notes or "",
-        "terms": terms,
         "due_date": data.due_date,
         "status": data.status,
         "payment_link": None,
@@ -633,9 +813,7 @@ async def get_invoice(invoice_id: str, user: dict = Depends(get_current_user)):
 
 @api_router.put("/invoices/{invoice_id}", response_model=InvoiceResponse)
 async def update_invoice(invoice_id: str, data: InvoiceCreate, user: dict = Depends(require_accountant_or_admin)):
-    tax_rate = data.tax_rate if data.tax_rate is not None else 10.0
-    shipping = data.shipping if data.shipping is not None else 0.0
-    subtotal, tax, total = calculate_totals(data.items, tax_rate, shipping)
+    subtotal, tax, total = calculate_totals(data.items)
     
     update_doc = {
         "client_name": data.client_name,
@@ -643,9 +821,7 @@ async def update_invoice(invoice_id: str, data: InvoiceCreate, user: dict = Depe
         "client_address": data.client_address or "",
         "items": data.items,
         "subtotal": subtotal,
-        "tax_rate": tax_rate,
         "tax": tax,
-        "shipping": shipping,
         "total": total,
         "notes": data.notes or "",
         "due_date": data.due_date,
@@ -694,56 +870,195 @@ async def mark_invoice_paid(invoice_id: str, payment_id: str = Query(...)):
         raise HTTPException(status_code=404, detail="Invoice not found")
     return {"message": "Invoice marked as paid"}
 
-class SendInvoiceRequest(BaseModel):
-    frontend_url: str  # The frontend URL for generating payment link
+# Helper function to generate PDF for invoices
+def generate_invoice_pdf(invoice: dict, branding: dict = None, payment_link: str = None, template: str = "professional") -> BytesIO:
+    """Generate a PDF for an invoice with template support"""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=72)
+    
+    # Get template settings
+    tmpl = PDF_TEMPLATES.get(template, PDF_TEMPLATES["professional"])
+    primary_color = colors.HexColor(branding.get("primary_color", tmpl["primary_color"])) if branding else colors.HexColor(tmpl["primary_color"])
+    header_bg = colors.HexColor(tmpl["header_bg"])
+    text_color = colors.white if template != "minimal" else colors.HexColor("#1f2937")
+    
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Company name / title
+    company_name = branding.get("company_name", "KyberBusiness") if branding else "KyberBusiness"
+    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=24, spaceAfter=20, textColor=primary_color, fontName=tmpl["font"])
+    elements.append(Paragraph(company_name, title_style))
+    
+    # Invoice header
+    header_style = ParagraphStyle('Header', parent=styles['Heading2'], fontSize=18, spaceAfter=12, fontName=tmpl["font"])
+    elements.append(Paragraph(f"INVOICE: {invoice['invoice_number']}", header_style))
+    elements.append(Spacer(1, 12))
+    
+    # Client info
+    normal_style = ParagraphStyle('Normal', parent=styles['Normal'], fontName=tmpl["font"])
+    elements.append(Paragraph(f"<b>Bill To:</b> {invoice['client_name']}", normal_style))
+    elements.append(Paragraph(f"<b>Email:</b> {invoice['client_email']}", normal_style))
+    if invoice.get('client_address'):
+        elements.append(Paragraph(f"<b>Address:</b> {invoice['client_address']}", normal_style))
+    elements.append(Paragraph(f"<b>Invoice Date:</b> {invoice['created_at'][:10]}", normal_style))
+    if invoice.get('due_date'):
+        elements.append(Paragraph(f"<b>Due Date:</b> {invoice['due_date']}", normal_style))
+    elements.append(Paragraph(f"<b>Status:</b> {invoice['status'].upper()}", normal_style))
+    elements.append(Spacer(1, 20))
+    
+    # Items table
+    table_data = [['Description', 'Qty', 'Price', 'Total']]
+    for item in invoice['items']:
+        qty = item.get('quantity', 1)
+        price = item.get('price', 0)
+        total = qty * price
+        table_data.append([
+            item.get('description', ''),
+            str(qty),
+            f"${price:.2f}",
+            f"${total:.2f}"
+        ])
+    
+    # Add totals
+    table_data.append(['', '', 'Subtotal:', f"${invoice['subtotal']:.2f}"])
+    table_data.append(['', '', 'Tax (10%):', f"${invoice['tax']:.2f}"])
+    table_data.append(['', '', 'Total Due:', f"${invoice['total']:.2f}"])
+    
+    table = Table(table_data, colWidths=[3.5*inch, 0.75*inch, 1*inch, 1*inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), header_bg),
+        ('TEXTCOLOR', (0, 0), (-1, 0), text_color),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+        ('FONTNAME', (0, 0), (-1, 0), f'{tmpl["font"]}-Bold' if tmpl["font"] == "Helvetica" else tmpl["font"]),
+        ('FONTSIZE', (0, 0), (-1, 0), 11),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -4), colors.white),
+        ('GRID', (0, 0), (-1, -4), 1, colors.lightgrey),
+        ('FONTNAME', (2, -3), (2, -1), f'{tmpl["font"]}-Bold' if tmpl["font"] == "Helvetica" else tmpl["font"]),
+        ('FONTNAME', (3, -1), (3, -1), f'{tmpl["font"]}-Bold' if tmpl["font"] == "Helvetica" else tmpl["font"]),
+        ('TEXTCOLOR', (3, -1), (3, -1), primary_color),
+    ]))
+    elements.append(table)
+    
+    # Payment link
+    if payment_link:
+        elements.append(Spacer(1, 20))
+        link_style = ParagraphStyle('Link', parent=normal_style, textColor=primary_color)
+        elements.append(Paragraph(f"<b>Pay Online:</b> <a href='{payment_link}'>{payment_link}</a>", link_style))
+    
+    # Notes
+    if invoice.get('notes'):
+        elements.append(Spacer(1, 20))
+        elements.append(Paragraph("<b>Notes:</b>", normal_style))
+        elements.append(Paragraph(invoice['notes'], normal_style))
+    
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
 
-@api_router.post("/invoices/{invoice_id}/send")
-async def send_invoice_email(invoice_id: str, data: SendInvoiceRequest, user: dict = Depends(require_accountant_or_admin)):
-    """Send invoice email to client with payment link"""
+@api_router.get("/invoices/{invoice_id}/pdf")
+async def get_invoice_pdf(invoice_id: str, template: str = Query("professional"), user: dict = Depends(get_current_user)):
+    """Generate and return PDF for an invoice"""
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     
     # Get branding settings
-    branding = await db.settings.find_one({"type": "branding"}, {"_id": 0})
-    company_name = branding.get("data", {}).get("company_name", "KyberBusiness") if branding else "KyberBusiness"
+    branding_doc = await db.settings.find_one({"type": "branding"}, {"_id": 0})
+    branding = branding_doc.get("data", {}) if branding_doc else {}
     
-    # Get default email template
-    template = await db.email_templates.find_one({"is_default": True}, {"_id": 0})
-    if not template:
-        # Use first template or default
-        templates = await db.email_templates.find({}, {"_id": 0}).to_list(1)
-        template = templates[0] if templates else {
-            "subject": "Invoice #{invoice_number} from " + company_name,
-            "body_html": """
-<div style="font-family: Georgia, serif; max-width: 600px; margin: 0 auto; padding: 40px; background: #ffffff; border: 1px solid #e0e0e0;">
-    <h1 style="color: #333; border-bottom: 2px solid #06b6d4; padding-bottom: 10px;">INVOICE</h1>
-    <p style="color: #666;">Invoice Number: <strong>#{invoice_number}</strong></p>
-    <p style="color: #666;">Amount Due: <strong>${total}</strong></p>
-    <p style="color: #666;">Due Date: <strong>{due_date}</strong></p>
-    <div style="margin: 30px 0;">
-        <a href="{payment_link}" style="background: #06b6d4; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px;">Pay Now</a>
-    </div>
-    <p style="color: #999; font-size: 12px;">Thank you for your business.</p>
-</div>
-            """
+    # Generate PDF with template
+    pdf_buffer = generate_invoice_pdf(invoice, branding, template=template)
+    
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={invoice['invoice_number']}.pdf"
         }
+    )
+
+class SendInvoiceRequest(BaseModel):
+    frontend_url: str  # The frontend URL for generating payment link
+    template: Optional[str] = "professional"
+
+@api_router.post("/invoices/{invoice_id}/send")
+async def send_invoice_email(invoice_id: str, data: SendInvoiceRequest, user: dict = Depends(require_accountant_or_admin)):
+    """Send invoice email to client with payment link and PDF attachment"""
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    # Get branding settings
+    branding_doc = await db.settings.find_one({"type": "branding"}, {"_id": 0})
+    branding = branding_doc.get("data", {}) if branding_doc else {}
+    company_name = branding.get("company_name", "KyberBusiness")
+    
+    # Get SMTP settings
+    smtp_settings = await db.settings.find_one({"type": "smtp"}, {"_id": 0})
+    if not smtp_settings:
+        raise HTTPException(status_code=400, detail="SMTP not configured. Please configure email settings first.")
+    
+    smtp_config = smtp_settings.get("data", {})
     
     # Build payment link
     payment_link = f"{data.frontend_url}/pay/{invoice_id}"
     
-    # Format the email
-    subject = template["subject"].replace("{invoice_number}", invoice["invoice_number"])
-    body = template["body_html"]
-    body = body.replace("{invoice_number}", invoice["invoice_number"])
-    body = body.replace("#{invoice_number}", invoice["invoice_number"])
-    body = body.replace("{total}", f"{invoice['total']:.2f}")
-    body = body.replace("${total}", f"${invoice['total']:.2f}")
-    body = body.replace("{due_date}", invoice.get("due_date") or "Upon Receipt")
-    body = body.replace("{payment_link}", payment_link)
+    # Generate PDF with payment link and template
+    template = data.template if data.template else "professional"
+    pdf_buffer = generate_invoice_pdf(invoice, branding, payment_link, template)
     
-    # Send the email
-    await send_email(invoice["client_email"], subject, body)
+    # Create email
+    message = MIMEMultipart("mixed")
+    message["From"] = f"{smtp_config.get('from_name', company_name)} <{smtp_config.get('from_email')}>"
+    message["To"] = invoice["client_email"]
+    message["Subject"] = f"Invoice {invoice['invoice_number']} from {company_name}"
+    
+    # HTML body
+    html_body = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h1 style="color: #06b6d4;">Invoice {invoice['invoice_number']}</h1>
+        <p>Dear {invoice['client_name']},</p>
+        <p>Please find attached your invoice from {company_name}.</p>
+        <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 5px 0;"><strong>Invoice Number:</strong> {invoice['invoice_number']}</p>
+            <p style="margin: 5px 0;"><strong>Amount Due:</strong> ${invoice['total']:.2f}</p>
+            <p style="margin: 5px 0;"><strong>Due Date:</strong> {invoice.get('due_date') or 'Upon Receipt'}</p>
+        </div>
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="{payment_link}" style="background: #06b6d4; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">Pay Now</a>
+        </div>
+        <p>If you have any questions, please don't hesitate to contact us.</p>
+        <p>Best regards,<br>{company_name}</p>
+    </div>
+    """
+    
+    # Attach HTML body
+    html_part = MIMEText(html_body, "html")
+    message.attach(html_part)
+    
+    # Attach PDF
+    pdf_attachment = MIMEBase("application", "pdf")
+    pdf_attachment.set_payload(pdf_buffer.read())
+    encoders.encode_base64(pdf_attachment)
+    pdf_attachment.add_header("Content-Disposition", f"attachment; filename={invoice['invoice_number']}.pdf")
+    message.attach(pdf_attachment)
+    
+    # Send email
+    try:
+        await aiosmtplib.send(
+            message,
+            hostname=smtp_config.get("host"),
+            port=smtp_config.get("port"),
+            username=smtp_config.get("username"),
+            password=decrypt_data(smtp_config.get("password")),
+            use_tls=smtp_config.get("use_tls", True)
+        )
+    except Exception as e:
+        logging.error(f"Failed to send invoice email: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
     
     # Update invoice status to sent if it was draft
     if invoice["status"] == "draft":
@@ -919,18 +1234,7 @@ async def delete_vendor(vendor_id: str, user: dict = Depends(require_accountant_
 
 @api_router.post("/settings/smtp")
 async def save_smtp_settings(data: SMTPSettings, user: dict = Depends(require_admin)):
-    # Get existing settings to preserve password if not provided
-    existing = await db.settings.find_one({"type": "smtp"}, {"_id": 0})
-    existing_data = existing.get("data", {}) if existing else {}
-    
-    # Use new password if provided, otherwise keep existing
-    if data.password:
-        encrypted_password = encrypt_data(data.password)
-    else:
-        encrypted_password = existing_data.get("password")
-        if not encrypted_password:
-            raise HTTPException(status_code=400, detail="Password is required for new SMTP configuration")
-    
+    encrypted_password = encrypt_data(data.password)
     settings_doc = {
         "type": "smtp",
         "data": {
@@ -960,81 +1264,8 @@ async def get_smtp_settings(user: dict = Depends(require_admin)):
         "username": data.get("username"),
         "from_email": data.get("from_email"),
         "from_name": data.get("from_name"),
-        "use_tls": data.get("use_tls", True),
-        "password_set": bool(data.get("password"))  # Indicate if password is set without revealing it
+        "use_tls": data.get("use_tls", True)
     }
-
-class TestEmailRequest(BaseModel):
-    to_email: EmailStr
-
-@api_router.post("/settings/smtp/test")
-async def test_smtp_settings(data: TestEmailRequest, user: dict = Depends(require_admin)):
-    """Send a test email to verify SMTP configuration"""
-    settings = await db.settings.find_one({"type": "smtp"}, {"_id": 0})
-    if not settings:
-        raise HTTPException(status_code=400, detail="SMTP not configured. Please save SMTP settings first.")
-    
-    smtp_config = settings.get("data", {})
-    
-    # Validate required fields
-    if not smtp_config.get("host"):
-        raise HTTPException(status_code=400, detail="SMTP host is not configured")
-    if not smtp_config.get("port"):
-        raise HTTPException(status_code=400, detail="SMTP port is not configured")
-    if not smtp_config.get("password"):
-        raise HTTPException(status_code=400, detail="SMTP password is not configured")
-    if not smtp_config.get("from_email"):
-        raise HTTPException(status_code=400, detail="From email is not configured")
-    
-    try:
-        message = MIMEMultipart("alternative")
-        message["From"] = f"{smtp_config.get('from_name', 'KyberBusiness')} <{smtp_config.get('from_email')}>"
-        message["To"] = data.to_email
-        message["Subject"] = "KyberBusiness - SMTP Test Email"
-        
-        body_html = """
-        <div style="font-family: Arial, sans-serif; padding: 20px;">
-            <h2 style="color: #06b6d4;">SMTP Configuration Test</h2>
-            <p>This is a test email from KyberBusiness.</p>
-            <p>If you received this email, your SMTP settings are configured correctly!</p>
-            <hr style="border: 1px solid #eee; margin: 20px 0;">
-            <p style="color: #666; font-size: 12px;">Sent from KyberBusiness Invoice System</p>
-        </div>
-        """
-        message.attach(MIMEText(body_html, "html"))
-        
-        # Decrypt password
-        decrypted_password = decrypt_data(smtp_config.get("password"))
-        
-        port = int(smtp_config.get("port"))
-        # Port 465 uses direct TLS, port 587 uses STARTTLS
-        if port == 465:
-            use_tls = True
-            start_tls = False
-        else:
-            use_tls = False
-            start_tls = True
-        
-        await aiosmtplib.send(
-            message,
-            hostname=smtp_config.get("host"),
-            port=port,
-            username=smtp_config.get("username"),
-            password=decrypted_password,
-            use_tls=use_tls,
-            start_tls=start_tls
-        )
-        
-        return {"message": f"Test email sent successfully to {data.to_email}"}
-    except aiosmtplib.SMTPAuthenticationError as e:
-        logging.error(f"SMTP authentication failed: {e}")
-        raise HTTPException(status_code=400, detail="SMTP authentication failed. Check your username and password.")
-    except aiosmtplib.SMTPConnectError as e:
-        logging.error(f"SMTP connection failed: {e}")
-        raise HTTPException(status_code=400, detail=f"Failed to connect to SMTP server. Check host and port. Error: {str(e)}")
-    except Exception as e:
-        logging.error(f"Failed to send test email: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to send test email: {str(e)}")
 
 @api_router.post("/settings/paypal")
 async def save_paypal_settings(data: PayPalSettings, user: dict = Depends(require_admin)):
@@ -1233,10 +1464,6 @@ async def delete_email_template(template_id: str, user: dict = Depends(require_a
 
 @api_router.post("/settings/branding")
 async def save_branding_settings(data: BrandingSettings, user: dict = Depends(require_admin)):
-    # Preserve existing logo_url
-    existing = await db.settings.find_one({"type": "branding"}, {"_id": 0})
-    existing_logo = existing.get("data", {}).get("logo_url") if existing else None
-    
     settings_doc = {
         "type": "branding",
         "data": {
@@ -1248,10 +1475,7 @@ async def save_branding_settings(data: BrandingSettings, user: dict = Depends(re
             "address": data.address or "",
             "phone": data.phone or "",
             "email": data.email or "",
-            "website": data.website or "",
-            "default_tax_rate": data.default_tax_rate if data.default_tax_rate is not None else 10.0,
-            "terms_and_conditions": data.terms_and_conditions or "",
-            "logo_url": existing_logo  # Preserve logo
+            "website": data.website or ""
         }
     }
     await db.settings.update_one({"type": "branding"}, {"$set": settings_doc}, upsert=True)
@@ -1272,20 +1496,10 @@ async def get_branding_settings(user: dict = Depends(get_current_user)):
             "phone": "",
             "email": "",
             "website": "",
-            "logo_url": None,
-            "default_tax_rate": 10.0,
-            "terms_and_conditions": ""
+            "logo_url": None
         }
     
     data = settings.get("data", {})
-    logo_url = data.get("logo_url")
-    # Normalize logo URL to simple /uploads/ format
-    if logo_url:
-        # Remove any /api or /public prefix, keep just /uploads/filename
-        if "/uploads/" in logo_url:
-            filename = logo_url.split("/uploads/")[-1]
-            logo_url = f"/uploads/{filename}"
-    
     return {
         "configured": True,
         "company_name": data.get("company_name", "KyberBusiness"),
@@ -1297,9 +1511,7 @@ async def get_branding_settings(user: dict = Depends(get_current_user)):
         "phone": data.get("phone", ""),
         "email": data.get("email", ""),
         "website": data.get("website", ""),
-        "logo_url": logo_url,
-        "default_tax_rate": data.get("default_tax_rate", 10.0),
-        "terms_and_conditions": data.get("terms_and_conditions", "")
+        "logo_url": data.get("logo_url")
     }
 
 @api_router.get("/public/branding")
@@ -1322,10 +1534,9 @@ async def get_public_branding():
     
     data = settings.get("data", {})
     logo_url = data.get("logo_url")
-    # Normalize logo URL to simple /uploads/ format
-    if logo_url and "/uploads/" in logo_url:
-        filename = logo_url.split("/uploads/")[-1]
-        logo_url = f"/uploads/{filename}"
+    # Convert authenticated URL to public URL for public access
+    if logo_url and logo_url.startswith("/uploads/"):
+        logo_url = "/public" + logo_url
     
     return {
         "company_name": data.get("company_name", "KyberBusiness"),
@@ -1357,7 +1568,7 @@ async def upload_logo(file: UploadFile = File(...), user: dict = Depends(require
     async with aiofiles.open(filepath, "wb") as f:
         await f.write(contents)
     
-    # Store URL as simple /uploads/ path - nginx will proxy to backend
+    # Store URL without /api prefix since frontend adds it
     logo_url = f"/uploads/{filename}"
     
     # Update branding settings with logo URL
