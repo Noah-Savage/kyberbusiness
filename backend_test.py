@@ -1011,7 +1011,7 @@ class KyberBusinessAPITester:
 
     def run_all_tests(self):
         """Run all API tests"""
-        print("🚀 Starting KyberBusiness API Tests")
+        print("🚀 Starting KyberBusiness API Tests - Bug Fixes Validation")
         print("=" * 50)
         
         # Basic connectivity
@@ -1027,9 +1027,24 @@ class KyberBusinessAPITester:
         self.test_admin_endpoints()
         self.test_viewer_admin_access()
         
+        # CRITICAL BUG FIX TESTS - Testing specific reported issues
+        print("\n" + "🚨 TESTING REPORTED BUG FIXES" + "🚨")
+        print("=" * 50)
+        
+        # Bug Fix #1: PDF download for quotes returning 404
+        self.test_quote_pdf_download()
+        
+        # Bug Fix #2: Send quote email returning 404  
+        self.test_quote_send_email()
+        
+        # Bug Fix #3: Loading invoices returning 500
+        self.test_invoices_crud()
+        
+        print("\n" + "📋 ADDITIONAL FUNCTIONALITY TESTS" + "📋")
+        print("=" * 50)
+        
         # CRUD operations
         self.test_quotes_crud()
-        self.test_invoices_crud()
         self.test_categories_and_vendors()
         self.test_expenses_crud()
         
@@ -1041,7 +1056,7 @@ class KyberBusinessAPITester:
         self.test_branding_endpoints()
         self.test_branding_viewer_access()
         
-        # Logo upload and send invoice functionality (new tests)
+        # Logo upload and send invoice functionality (existing tests)
         self.test_logo_upload_functionality()
         self.test_send_invoice_functionality()
         self.test_public_invoice_access()
