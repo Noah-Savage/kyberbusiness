@@ -663,8 +663,13 @@ def generate_quote_pdf(quote: dict, branding: dict = None, template: str = "prof
     buffer.seek(0)
     return buffer
 
+@api_router.get("/pdf-templates")
+async def get_pdf_templates(user: dict = Depends(get_current_user)):
+    """Get available PDF templates"""
+    return [{"id": k, "name": v["name"]} for k, v in PDF_TEMPLATES.items()]
+
 @api_router.get("/quotes/{quote_id}/pdf")
-async def get_quote_pdf(quote_id: str, user: dict = Depends(get_current_user)):
+async def get_quote_pdf(quote_id: str, template: str = Query("professional"), user: dict = Depends(get_current_user)):
     """Generate and return PDF for a quote"""
     quote = await db.quotes.find_one({"id": quote_id}, {"_id": 0})
     if not quote:
@@ -674,8 +679,8 @@ async def get_quote_pdf(quote_id: str, user: dict = Depends(get_current_user)):
     branding_doc = await db.settings.find_one({"type": "branding"}, {"_id": 0})
     branding = branding_doc.get("data", {}) if branding_doc else {}
     
-    # Generate PDF
-    pdf_buffer = generate_quote_pdf(quote, branding)
+    # Generate PDF with template
+    pdf_buffer = generate_quote_pdf(quote, branding, template)
     
     return StreamingResponse(
         pdf_buffer,
@@ -687,6 +692,7 @@ async def get_quote_pdf(quote_id: str, user: dict = Depends(get_current_user)):
 
 class SendQuoteEmailRequest(BaseModel):
     frontend_url: Optional[str] = None
+    template: Optional[str] = "professional"
 
 @api_router.post("/quotes/{quote_id}/send-email")
 async def send_quote_email(quote_id: str, data: SendQuoteEmailRequest = None, user: dict = Depends(require_accountant_or_admin)):
