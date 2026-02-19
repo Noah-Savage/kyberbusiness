@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { Plus, Trash2, Edit, Eye, ArrowLeft, CalendarIcon, Receipt, Copy, ExternalLink, Loader2, Search, CreditCard, Mail } from "lucide-react";
+import { Plus, Trash2, Edit, Eye, ArrowLeft, CalendarIcon, Receipt, Copy, ExternalLink, Loader2, Search, CreditCard, Mail, Download, FileText } from "lucide-react";
 
 function InvoiceRow(props) {
   const { invoice, canEdit, onView, onEdit } = props;
