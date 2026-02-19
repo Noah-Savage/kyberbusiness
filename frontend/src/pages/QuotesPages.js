@@ -313,9 +313,12 @@ export function ViewQuotePage() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewUrl, setPreviewUrl] = useState(null);
+  const [selectedTemplate, setSelectedTemplate] = useState("professional");
+  const [templates, setTemplates] = useState([]);
 
   useEffect(function() {
     api.get("/quotes/" + id).then(function(data) { setQuote(data); }).catch(function() { toast.error("Failed to load quote"); navigate("/quotes"); }).finally(function() { setLoading(false); });
+    api.get("/pdf-templates").then(function(data) { setTemplates(data); }).catch(function() {});
   }, [id, navigate]);
 
   function handleConvert() {
@@ -329,7 +332,7 @@ export function ViewQuotePage() {
 
   function handleDownloadPDF() {
     const token = localStorage.getItem("token");
-    const url = process.env.REACT_APP_BACKEND_URL + "/api/quotes/" + id + "/pdf";
+    const url = process.env.REACT_APP_BACKEND_URL + "/api/quotes/" + id + "/pdf?template=" + selectedTemplate;
     fetch(url, { headers: { "Authorization": "Bearer " + token } })
       .then(function(response) {
         if (!response.ok) throw new Error("Failed to download PDF");
