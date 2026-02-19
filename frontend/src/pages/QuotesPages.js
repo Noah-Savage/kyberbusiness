@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { Plus, Trash2, Edit, Eye, ArrowLeft, CalendarIcon, FileText, ArrowRightCircle, Loader2, Search } from "lucide-react";
+import { Plus, Trash2, Edit, Eye, ArrowLeft, CalendarIcon, FileText, ArrowRightCircle, Loader2, Search, Download, Mail } from "lucide-react";
 
 function QuoteRow({ quote, canEdit, onView, onEdit }) {
   return (
