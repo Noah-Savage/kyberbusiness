@@ -328,6 +328,8 @@ export function ViewInvoicePage() {
   const [loading, setLoading] = useState(true);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(null);
 
   useEffect(function() {
     api.get("/invoices/" + id).then(function(data) { setInvoice(data); }).catch(function() { toast.error("Failed to load invoice"); navigate("/invoices"); }).finally(function() { setLoading(false); });
@@ -355,6 +357,44 @@ export function ViewInvoicePage() {
       .finally(function() { setSending(false); });
   }
 
+  function handleDownloadPDF() {
+    const token = localStorage.getItem("token");
+    const url = process.env.REACT_APP_BACKEND_URL + "/api/invoices/" + id + "/pdf";
+    fetch(url, { headers: { "Authorization": "Bearer " + token } })
+      .then(function(response) {
+        if (!response.ok) throw new Error("Failed to download PDF");
+        return response.blob();
+      })
+      .then(function(blob) {
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = downloadUrl;
+        a.download = invoice.invoice_number + ".pdf";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(downloadUrl);
+        toast.success("PDF downloaded");
+      })
+      .catch(function(err) { toast.error(err.message); });
+  }
+
+  function handlePreviewPDF() {
+    const token = localStorage.getItem("token");
+    const url = process.env.REACT_APP_BACKEND_URL + "/api/invoices/" + id + "/pdf";
+    fetch(url, { headers: { "Authorization": "Bearer " + token } })
+      .then(function(response) {
+        if (!response.ok) throw new Error("Failed to load preview");
+        return response.blob();
+      })
+      .then(function(blob) {
+        const blobUrl = window.URL.createObjectURL(blob);
+        setPreviewUrl(blobUrl);
+        setPreviewOpen(true);
+      })
+      .catch(function(err) { toast.error(err.message); });
+  }
+
   if (loading) return <div className="flex items-center justify-center min-h-[60vh]"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
   if (!invoice) return null;
 
@@ -372,11 +412,13 @@ export function ViewInvoicePage() {
         </div>
         {canEdit && (
           <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={handlePreviewPDF} className="rounded-full" data-testid="preview-invoice-btn"><FileText className="w-4 h-4 mr-2" /> Preview</Button>
+            <Button variant="outline" onClick={handleDownloadPDF} className="rounded-full" data-testid="download-invoice-pdf-btn"><Download className="w-4 h-4 mr-2" /> Download PDF</Button>
             <Button variant="outline" onClick={handleSendInvoice} disabled={sending || invoice.status === "paid"} className="rounded-full" data-testid="send-invoice-btn">
               {sending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Mail className="w-4 h-4 mr-2" />} Send Invoice
             </Button>
-            <Button variant="outline" onClick={copyPaymentLink} className="rounded-full" data-testid="copy-payment-link"><Copy className="w-4 h-4 mr-2" /> Copy Payment Link</Button>
-            <Button variant="outline" onClick={function() { window.open("/pay/" + id, "_blank"); }} className="rounded-full" data-testid="open-payment-page"><ExternalLink className="w-4 h-4 mr-2" /> Payment Page</Button>
+            <Button variant="outline" onClick={copyPaymentLink} className="rounded-full" data-testid="copy-payment-link"><Copy className="w-4 h-4 mr-2" /> Copy Link</Button>
+            <Button variant="outline" onClick={function() { window.open("/pay/" + id, "_blank"); }} className="rounded-full" data-testid="open-payment-page"><ExternalLink className="w-4 h-4 mr-2" /> Payment</Button>
             <Button variant="outline" onClick={function() { navigate("/invoices/" + id + "/edit"); }} className="rounded-full" data-testid="edit-invoice-btn"><Edit className="w-4 h-4 mr-2" /> Edit</Button>
             <Button variant="destructive" onClick={function() { setDeleteOpen(true); }} className="rounded-full" data-testid="delete-invoice-btn"><Trash2 className="w-4 h-4" /></Button>
           </div>
