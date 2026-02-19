@@ -311,6 +311,8 @@ export function ViewQuotePage() {
   const [converting, setConverting] = useState(false);
   const [sending, setSending] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState(null);
 
   useEffect(function() {
     api.get("/quotes/" + id).then(function(data) { setQuote(data); }).catch(function() { toast.error("Failed to load quote"); navigate("/quotes"); }).finally(function() { setLoading(false); });
@@ -343,6 +345,22 @@ export function ViewQuotePage() {
         document.body.removeChild(a);
         window.URL.revokeObjectURL(downloadUrl);
         toast.success("PDF downloaded");
+      })
+      .catch(function(err) { toast.error(err.message); });
+  }
+
+  function handlePreviewPDF() {
+    const token = localStorage.getItem("token");
+    const url = process.env.REACT_APP_BACKEND_URL + "/api/quotes/" + id + "/pdf";
+    fetch(url, { headers: { "Authorization": "Bearer " + token } })
+      .then(function(response) {
+        if (!response.ok) throw new Error("Failed to load preview");
+        return response.blob();
+      })
+      .then(function(blob) {
+        const blobUrl = window.URL.createObjectURL(blob);
+        setPreviewUrl(blobUrl);
+        setPreviewOpen(true);
       })
       .catch(function(err) { toast.error(err.message); });
   }
