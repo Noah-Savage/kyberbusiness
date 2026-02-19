@@ -374,7 +374,9 @@ export function ViewQuotePage() {
           <div><h1 className="text-3xl font-bold font-heading">{quote.quote_number}</h1><Badge className={getStatusColor(quote.status) + " capitalize mt-1"}>{quote.status}</Badge></div>
         </div>
         {canEdit && quote.status !== "converted" && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={handleDownloadPDF} className="rounded-full" data-testid="download-pdf-btn"><Download className="w-4 h-4 mr-2" /> Download PDF</Button>
+            <Button variant="outline" onClick={handleSendEmail} disabled={sending} className="rounded-full" data-testid="send-quote-btn">{sending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Mail className="w-4 h-4 mr-2" />} Send Quote</Button>
             <Button variant="outline" onClick={function() { navigate("/quotes/" + id + "/edit"); }} className="rounded-full"><Edit className="w-4 h-4 mr-2" /> Edit</Button>
             <Button onClick={handleConvert} disabled={converting} className="rounded-full shadow-glow-magenta bg-secondary">{converting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ArrowRightCircle className="w-4 h-4 mr-2" />}Convert to Invoice</Button>
             <Button variant="destructive" onClick={function() { setDeleteOpen(true); }} className="rounded-full"><Trash2 className="w-4 h-4" /></Button>
