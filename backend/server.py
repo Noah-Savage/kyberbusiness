@@ -550,6 +550,181 @@ async def convert_quote_to_invoice(quote_id: str, user: dict = Depends(require_a
     
     return InvoiceResponse(**{k: v for k, v in invoice_doc.items() if k != "_id"})
 
+# Helper function to generate PDF for quotes
+def generate_quote_pdf(quote: dict, branding: dict = None) -> BytesIO:
+    """Generate a PDF for a quote"""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=72)
+    
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Company name / title
+    company_name = branding.get("company_name", "KyberBusiness") if branding else "KyberBusiness"
+    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=24, spaceAfter=20, textColor=colors.HexColor('#06b6d4'))
+    elements.append(Paragraph(company_name, title_style))
+    
+    # Quote header
+    header_style = ParagraphStyle('Header', parent=styles['Heading2'], fontSize=18, spaceAfter=12)
+    elements.append(Paragraph(f"QUOTE: {quote['quote_number']}", header_style))
+    elements.append(Spacer(1, 12))
+    
+    # Client info
+    normal_style = styles['Normal']
+    elements.append(Paragraph(f"<b>Client:</b> {quote['client_name']}", normal_style))
+    elements.append(Paragraph(f"<b>Email:</b> {quote['client_email']}", normal_style))
+    if quote.get('client_address'):
+        elements.append(Paragraph(f"<b>Address:</b> {quote['client_address']}", normal_style))
+    elements.append(Paragraph(f"<b>Date:</b> {quote['created_at'][:10]}", normal_style))
+    if quote.get('valid_until'):
+        elements.append(Paragraph(f"<b>Valid Until:</b> {quote['valid_until']}", normal_style))
+    elements.append(Spacer(1, 20))
+    
+    # Items table
+    table_data = [['Description', 'Qty', 'Price', 'Total']]
+    for item in quote['items']:
+        qty = item.get('quantity', 1)
+        price = item.get('price', 0)
+        total = qty * price
+        table_data.append([
+            item.get('description', ''),
+            str(qty),
+            f"${price:.2f}",
+            f"${total:.2f}"
+        ])
+    
+    # Add totals
+    table_data.append(['', '', 'Subtotal:', f"${quote['subtotal']:.2f}"])
+    table_data.append(['', '', 'Tax (10%):', f"${quote['tax']:.2f}"])
+    table_data.append(['', '', 'Total:', f"${quote['total']:.2f}"])
+    
+    table = Table(table_data, colWidths=[3.5*inch, 0.75*inch, 1*inch, 1*inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#06b6d4')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 11),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -4), colors.white),
+        ('GRID', (0, 0), (-1, -4), 1, colors.lightgrey),
+        ('FONTNAME', (2, -3), (2, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (3, -1), (3, -1), 'Helvetica-Bold'),
+        ('TEXTCOLOR', (3, -1), (3, -1), colors.HexColor('#06b6d4')),
+    ]))
+    elements.append(table)
+    
+    # Notes
+    if quote.get('notes'):
+        elements.append(Spacer(1, 20))
+        elements.append(Paragraph("<b>Notes:</b>", normal_style))
+        elements.append(Paragraph(quote['notes'], normal_style))
+    
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+@api_router.get("/quotes/{quote_id}/pdf")
+async def get_quote_pdf(quote_id: str, user: dict = Depends(get_current_user)):
+    """Generate and return PDF for a quote"""
+    quote = await db.quotes.find_one({"id": quote_id}, {"_id": 0})
+    if not quote:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    
+    # Get branding settings
+    branding_doc = await db.settings.find_one({"type": "branding"}, {"_id": 0})
+    branding = branding_doc.get("data", {}) if branding_doc else {}
+    
+    # Generate PDF
+    pdf_buffer = generate_quote_pdf(quote, branding)
+    
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={quote['quote_number']}.pdf"
+        }
+    )
+
+class SendQuoteEmailRequest(BaseModel):
+    frontend_url: Optional[str] = None
+
+@api_router.post("/quotes/{quote_id}/send-email")
+async def send_quote_email(quote_id: str, data: SendQuoteEmailRequest = None, user: dict = Depends(require_accountant_or_admin)):
+    """Send quote email to client with PDF attachment"""
+    quote = await db.quotes.find_one({"id": quote_id}, {"_id": 0})
+    if not quote:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    
+    # Get branding settings
+    branding_doc = await db.settings.find_one({"type": "branding"}, {"_id": 0})
+    branding = branding_doc.get("data", {}) if branding_doc else {}
+    company_name = branding.get("company_name", "KyberBusiness")
+    
+    # Get SMTP settings
+    smtp_settings = await db.settings.find_one({"type": "smtp"}, {"_id": 0})
+    if not smtp_settings:
+        raise HTTPException(status_code=400, detail="SMTP not configured. Please configure email settings first.")
+    
+    smtp_config = smtp_settings.get("data", {})
+    
+    # Generate PDF
+    pdf_buffer = generate_quote_pdf(quote, branding)
+    
+    # Create email
+    message = MIMEMultipart("mixed")
+    message["From"] = f"{smtp_config.get('from_name', company_name)} <{smtp_config.get('from_email')}>"
+    message["To"] = quote["client_email"]
+    message["Subject"] = f"Quote {quote['quote_number']} from {company_name}"
+    
+    # HTML body
+    html_body = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h1 style="color: #06b6d4;">Quote {quote['quote_number']}</h1>
+        <p>Dear {quote['client_name']},</p>
+        <p>Please find attached your quote from {company_name}.</p>
+        <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 5px 0;"><strong>Quote Number:</strong> {quote['quote_number']}</p>
+            <p style="margin: 5px 0;"><strong>Total:</strong> ${quote['total']:.2f}</p>
+            {f"<p style='margin: 5px 0;'><strong>Valid Until:</strong> {quote['valid_until']}</p>" if quote.get('valid_until') else ""}
+        </div>
+        <p>If you have any questions, please don't hesitate to contact us.</p>
+        <p>Best regards,<br>{company_name}</p>
+    </div>
+    """
+    
+    # Attach HTML body
+    html_part = MIMEText(html_body, "html")
+    message.attach(html_part)
+    
+    # Attach PDF
+    pdf_attachment = MIMEBase("application", "pdf")
+    pdf_attachment.set_payload(pdf_buffer.read())
+    encoders.encode_base64(pdf_attachment)
+    pdf_attachment.add_header("Content-Disposition", f"attachment; filename={quote['quote_number']}.pdf")
+    message.attach(pdf_attachment)
+    
+    # Send email
+    try:
+        await aiosmtplib.send(
+            message,
+            hostname=smtp_config.get("host"),
+            port=smtp_config.get("port"),
+            username=smtp_config.get("username"),
+            password=decrypt_data(smtp_config.get("password")),
+            use_tls=smtp_config.get("use_tls", True)
+        )
+    except Exception as e:
+        logging.error(f"Failed to send quote email: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
+    
+    # Update quote status to sent if it was draft
+    if quote["status"] == "draft":
+        await db.quotes.update_one({"id": quote_id}, {"$set": {"status": "sent"}})
+    
+    return {"message": "Quote sent successfully", "sent_to": quote["client_email"]}
+
 # ==================== INVOICES ROUTES ====================
 
 @api_router.post("/invoices", response_model=InvoiceResponse)
