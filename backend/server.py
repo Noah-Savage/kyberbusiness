@@ -825,56 +825,187 @@ async def mark_invoice_paid(invoice_id: str, payment_id: str = Query(...)):
         raise HTTPException(status_code=404, detail="Invoice not found")
     return {"message": "Invoice marked as paid"}
 
-class SendInvoiceRequest(BaseModel):
-    frontend_url: str  # The frontend URL for generating payment link
+# Helper function to generate PDF for invoices
+def generate_invoice_pdf(invoice: dict, branding: dict = None, payment_link: str = None) -> BytesIO:
+    """Generate a PDF for an invoice"""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=72)
+    
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Company name / title
+    company_name = branding.get("company_name", "KyberBusiness") if branding else "KyberBusiness"
+    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontSize=24, spaceAfter=20, textColor=colors.HexColor('#06b6d4'))
+    elements.append(Paragraph(company_name, title_style))
+    
+    # Invoice header
+    header_style = ParagraphStyle('Header', parent=styles['Heading2'], fontSize=18, spaceAfter=12)
+    elements.append(Paragraph(f"INVOICE: {invoice['invoice_number']}", header_style))
+    elements.append(Spacer(1, 12))
+    
+    # Client info
+    normal_style = styles['Normal']
+    elements.append(Paragraph(f"<b>Bill To:</b> {invoice['client_name']}", normal_style))
+    elements.append(Paragraph(f"<b>Email:</b> {invoice['client_email']}", normal_style))
+    if invoice.get('client_address'):
+        elements.append(Paragraph(f"<b>Address:</b> {invoice['client_address']}", normal_style))
+    elements.append(Paragraph(f"<b>Invoice Date:</b> {invoice['created_at'][:10]}", normal_style))
+    if invoice.get('due_date'):
+        elements.append(Paragraph(f"<b>Due Date:</b> {invoice['due_date']}", normal_style))
+    elements.append(Paragraph(f"<b>Status:</b> {invoice['status'].upper()}", normal_style))
+    elements.append(Spacer(1, 20))
+    
+    # Items table
+    table_data = [['Description', 'Qty', 'Price', 'Total']]
+    for item in invoice['items']:
+        qty = item.get('quantity', 1)
+        price = item.get('price', 0)
+        total = qty * price
+        table_data.append([
+            item.get('description', ''),
+            str(qty),
+            f"${price:.2f}",
+            f"${total:.2f}"
+        ])
+    
+    # Add totals
+    table_data.append(['', '', 'Subtotal:', f"${invoice['subtotal']:.2f}"])
+    table_data.append(['', '', 'Tax (10%):', f"${invoice['tax']:.2f}"])
+    table_data.append(['', '', 'Total Due:', f"${invoice['total']:.2f}"])
+    
+    table = Table(table_data, colWidths=[3.5*inch, 0.75*inch, 1*inch, 1*inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#06b6d4')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 11),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -4), colors.white),
+        ('GRID', (0, 0), (-1, -4), 1, colors.lightgrey),
+        ('FONTNAME', (2, -3), (2, -1), 'Helvetica-Bold'),
+        ('FONTNAME', (3, -1), (3, -1), 'Helvetica-Bold'),
+        ('TEXTCOLOR', (3, -1), (3, -1), colors.HexColor('#06b6d4')),
+    ]))
+    elements.append(table)
+    
+    # Payment link
+    if payment_link:
+        elements.append(Spacer(1, 20))
+        link_style = ParagraphStyle('Link', parent=normal_style, textColor=colors.HexColor('#06b6d4'))
+        elements.append(Paragraph(f"<b>Pay Online:</b> <a href='{payment_link}'>{payment_link}</a>", link_style))
+    
+    # Notes
+    if invoice.get('notes'):
+        elements.append(Spacer(1, 20))
+        elements.append(Paragraph("<b>Notes:</b>", normal_style))
+        elements.append(Paragraph(invoice['notes'], normal_style))
+    
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
 
-@api_router.post("/invoices/{invoice_id}/send")
-async def send_invoice_email(invoice_id: str, data: SendInvoiceRequest, user: dict = Depends(require_accountant_or_admin)):
-    """Send invoice email to client with payment link"""
+@api_router.get("/invoices/{invoice_id}/pdf")
+async def get_invoice_pdf(invoice_id: str, user: dict = Depends(get_current_user)):
+    """Generate and return PDF for an invoice"""
     invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     
     # Get branding settings
-    branding = await db.settings.find_one({"type": "branding"}, {"_id": 0})
-    company_name = branding.get("data", {}).get("company_name", "KyberBusiness") if branding else "KyberBusiness"
+    branding_doc = await db.settings.find_one({"type": "branding"}, {"_id": 0})
+    branding = branding_doc.get("data", {}) if branding_doc else {}
     
-    # Get default email template
-    template = await db.email_templates.find_one({"is_default": True}, {"_id": 0})
-    if not template:
-        # Use first template or default
-        templates = await db.email_templates.find({}, {"_id": 0}).to_list(1)
-        template = templates[0] if templates else {
-            "subject": "Invoice #{invoice_number} from " + company_name,
-            "body_html": """
-<div style="font-family: Georgia, serif; max-width: 600px; margin: 0 auto; padding: 40px; background: #ffffff; border: 1px solid #e0e0e0;">
-    <h1 style="color: #333; border-bottom: 2px solid #06b6d4; padding-bottom: 10px;">INVOICE</h1>
-    <p style="color: #666;">Invoice Number: <strong>#{invoice_number}</strong></p>
-    <p style="color: #666;">Amount Due: <strong>${total}</strong></p>
-    <p style="color: #666;">Due Date: <strong>{due_date}</strong></p>
-    <div style="margin: 30px 0;">
-        <a href="{payment_link}" style="background: #06b6d4; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px;">Pay Now</a>
-    </div>
-    <p style="color: #999; font-size: 12px;">Thank you for your business.</p>
-</div>
-            """
+    # Generate PDF
+    pdf_buffer = generate_invoice_pdf(invoice, branding)
+    
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={invoice['invoice_number']}.pdf"
         }
+    )
+
+class SendInvoiceRequest(BaseModel):
+    frontend_url: str  # The frontend URL for generating payment link
+
+@api_router.post("/invoices/{invoice_id}/send")
+async def send_invoice_email(invoice_id: str, data: SendInvoiceRequest, user: dict = Depends(require_accountant_or_admin)):
+    """Send invoice email to client with payment link and PDF attachment"""
+    invoice = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    
+    # Get branding settings
+    branding_doc = await db.settings.find_one({"type": "branding"}, {"_id": 0})
+    branding = branding_doc.get("data", {}) if branding_doc else {}
+    company_name = branding.get("company_name", "KyberBusiness")
+    
+    # Get SMTP settings
+    smtp_settings = await db.settings.find_one({"type": "smtp"}, {"_id": 0})
+    if not smtp_settings:
+        raise HTTPException(status_code=400, detail="SMTP not configured. Please configure email settings first.")
+    
+    smtp_config = smtp_settings.get("data", {})
     
     # Build payment link
     payment_link = f"{data.frontend_url}/pay/{invoice_id}"
     
-    # Format the email
-    subject = template["subject"].replace("{invoice_number}", invoice["invoice_number"])
-    body = template["body_html"]
-    body = body.replace("{invoice_number}", invoice["invoice_number"])
-    body = body.replace("#{invoice_number}", invoice["invoice_number"])
-    body = body.replace("{total}", f"{invoice['total']:.2f}")
-    body = body.replace("${total}", f"${invoice['total']:.2f}")
-    body = body.replace("{due_date}", invoice.get("due_date") or "Upon Receipt")
-    body = body.replace("{payment_link}", payment_link)
+    # Generate PDF with payment link
+    pdf_buffer = generate_invoice_pdf(invoice, branding, payment_link)
     
-    # Send the email
-    await send_email(invoice["client_email"], subject, body)
+    # Create email
+    message = MIMEMultipart("mixed")
+    message["From"] = f"{smtp_config.get('from_name', company_name)} <{smtp_config.get('from_email')}>"
+    message["To"] = invoice["client_email"]
+    message["Subject"] = f"Invoice {invoice['invoice_number']} from {company_name}"
+    
+    # HTML body
+    html_body = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+        <h1 style="color: #06b6d4;">Invoice {invoice['invoice_number']}</h1>
+        <p>Dear {invoice['client_name']},</p>
+        <p>Please find attached your invoice from {company_name}.</p>
+        <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 5px 0;"><strong>Invoice Number:</strong> {invoice['invoice_number']}</p>
+            <p style="margin: 5px 0;"><strong>Amount Due:</strong> ${invoice['total']:.2f}</p>
+            <p style="margin: 5px 0;"><strong>Due Date:</strong> {invoice.get('due_date') or 'Upon Receipt'}</p>
+        </div>
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="{payment_link}" style="background: #06b6d4; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; display: inline-block;">Pay Now</a>
+        </div>
+        <p>If you have any questions, please don't hesitate to contact us.</p>
+        <p>Best regards,<br>{company_name}</p>
+    </div>
+    """
+    
+    # Attach HTML body
+    html_part = MIMEText(html_body, "html")
+    message.attach(html_part)
+    
+    # Attach PDF
+    pdf_attachment = MIMEBase("application", "pdf")
+    pdf_attachment.set_payload(pdf_buffer.read())
+    encoders.encode_base64(pdf_attachment)
+    pdf_attachment.add_header("Content-Disposition", f"attachment; filename={invoice['invoice_number']}.pdf")
+    message.attach(pdf_attachment)
+    
+    # Send email
+    try:
+        await aiosmtplib.send(
+            message,
+            hostname=smtp_config.get("host"),
+            port=smtp_config.get("port"),
+            username=smtp_config.get("username"),
+            password=decrypt_data(smtp_config.get("password")),
+            use_tls=smtp_config.get("use_tls", True)
+        )
+    except Exception as e:
+        logging.error(f"Failed to send invoice email: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
     
     # Update invoice status to sent if it was draft
     if invoice["status"] == "draft":
