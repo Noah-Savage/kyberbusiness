@@ -354,7 +354,7 @@ export function ViewQuotePage() {
 
   function handlePreviewPDF() {
     const token = localStorage.getItem("token");
-    const url = process.env.REACT_APP_BACKEND_URL + "/api/quotes/" + id + "/pdf";
+    const url = process.env.REACT_APP_BACKEND_URL + "/api/quotes/" + id + "/pdf?template=" + selectedTemplate;
     fetch(url, { headers: { "Authorization": "Bearer " + token } })
       .then(function(response) {
         if (!response.ok) throw new Error("Failed to load preview");
@@ -370,7 +370,7 @@ export function ViewQuotePage() {
 
   function handleSendEmail() {
     setSending(true);
-    api.post("/quotes/" + id + "/send-email", {})
+    api.post("/quotes/" + id + "/send-email", { template: selectedTemplate })
       .then(function(data) {
         toast.success("Quote sent to " + quote.client_email);
         api.get("/quotes/" + id).then(function(data) { setQuote(data); });
