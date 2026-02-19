@@ -439,6 +439,19 @@ export function ViewQuotePage() {
         <DialogContent className="rounded-3xl"><DialogHeader><DialogTitle>Delete Quote</DialogTitle><DialogDescription>Are you sure? This cannot be undone.</DialogDescription></DialogHeader>
         <DialogFooter><Button variant="outline" onClick={function() { setDeleteOpen(false); }} className="rounded-full">Cancel</Button><Button variant="destructive" onClick={handleDelete} className="rounded-full">Delete</Button></DialogFooter></DialogContent>
       </Dialog>
+
+      <Dialog open={previewOpen} onOpenChange={function(open) { setPreviewOpen(open); if (!open && previewUrl) { window.URL.revokeObjectURL(previewUrl); setPreviewUrl(null); } }}>
+        <DialogContent className="rounded-3xl max-w-4xl h-[80vh]">
+          <DialogHeader><DialogTitle>Quote Preview - {quote.quote_number}</DialogTitle></DialogHeader>
+          <div className="flex-1 h-full min-h-[60vh]">
+            {previewUrl && <iframe src={previewUrl} className="w-full h-full rounded-xl border" title="Quote PDF Preview" />}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={function() { setPreviewOpen(false); }} className="rounded-full">Close</Button>
+            <Button onClick={handleDownloadPDF} className="rounded-full shadow-glow-cyan"><Download className="w-4 h-4 mr-2" /> Download</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
