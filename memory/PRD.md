@@ -71,33 +71,38 @@ KyberBusiness is a comprehensive business management application for:
 - aiosmtplib (async email)
 - aiofiles (async file operations)
 
-### February 19, 2026 - Invoice PDF & Preview Features Added
+### February 19, 2026 - PDF Templates & Branding Updates
 
-**New Features:**
+**Changes Made:**
 
-1. **Invoice PDF Generation**
-   - Added `GET /api/invoices/{id}/pdf` endpoint
-   - PDF includes company branding, invoice details, line items, totals, payment link
-   - Added "Download PDF" button to ViewInvoicePage
+1. **Removed Emergent Branding**
+   - Cleaned up index.html to remove "Made with Emergent" badge
+   - Updated page title to "KyberBusiness"
 
-2. **Invoice Email with PDF Attachment**
-   - Updated `POST /api/invoices/{id}/send` to include PDF attachment
-   - Email includes payment link button and PDF invoice attachment
+2. **Added PDF Templates (4 styles)**
+   - **Professional** - Cyan primary color, clean modern look
+   - **Modern** - Purple/violet colors, contemporary style  
+   - **Classic** - Dark gray/black, Times Roman font, traditional look
+   - **Minimal** - Black text on light gray header, minimalist design
 
-3. **PDF Preview for Quotes**
-   - Added "Preview" button to ViewQuotePage
-   - Opens modal dialog with embedded PDF iframe
-   - Can download directly from preview modal
+3. **Template Selection UI**
+   - Added template selector dropdown on Quote view page
+   - Added template selector dropdown on Invoice view page
+   - Templates affect PDF preview, download, and email attachments
 
-4. **PDF Preview for Invoices**
-   - Added "Preview" button to ViewInvoicePage
-   - Opens modal dialog with embedded PDF iframe
-   - Can download directly from preview modal
+4. **Toast Notifications (already existed)**
+   - Success toast when quote/invoice email sent successfully
+   - Error toast when SMTP not configured or send fails
+   - Error toast for PDF download/preview failures
 
-**Files Modified:**
-- `/app/backend/server.py` - Added invoice PDF generation, updated invoice send to include PDF
-- `/app/frontend/src/pages/QuotesPages.js` - Added Preview button and modal
-- `/app/frontend/src/pages/InvoicesPages.js` - Added Preview, Download PDF buttons and modal
+**New Endpoint:**
+- `GET /api/pdf-templates` - Returns list of available templates
+
+**Updated Endpoints:**
+- `GET /api/quotes/{id}/pdf?template=<template>` - Template parameter
+- `GET /api/invoices/{id}/pdf?template=<template>` - Template parameter
+- `POST /api/quotes/{id}/send-email` - Accepts template in body
+- `POST /api/invoices/{id}/send` - Accepts template in body
 
 ---
 
